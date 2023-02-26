@@ -1,28 +1,39 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.4.0 <0.8.0;
 
+// 包含512位的数学函数
 /// @title Contains 512-bit math functions
+// 促进乘法和除法,可以有一个中间值的溢出,而不需要任何精度的损失
 /// @notice Facilitates multiplication and division that can have overflow of an intermediate value without any loss of precision
+// 处理“幽灵溢出”即。,允许乘法和除法,中间值超过256位
 /// @dev Handles "phantom overflow" i.e., allows multiplication and division where an intermediate value overflows 256 bits
 library FullMath {
+    // 用完全精度计算地板(a×b的分母)。如果结果溢出uint256或分母= 0,抛出
     /// @notice Calculates floor(a×b÷denominator) with full precision. Throws if result overflows a uint256 or denominator == 0
-    /// @param a The multiplicand
-    /// @param b The multiplier
-    /// @param denominator The divisor
-    /// @return result The 256-bit result
+    /// @param a The multiplicand 被乘数
+    /// @param b The multiplier  倍增器
+    /// @param denominator The divisor 分母，除数
+    /// @return result The 256-bit result 256位的结果
+    // 请记住麻省理工学院许可的Remco Bloemen
     /// @dev Credit to Remco Bloemen under MIT license https://xn--2-umb.com/21/muldiv
     function mulDiv(
         uint256 a,
         uint256 b,
-        uint256 denominator
+        uint256 denominator//分母
+        // 内部，纯函数
     ) internal pure returns (uint256 result) {
+        // 512位乘 [产品1 产品0] = a * b
         // 512-bit multiply [prod1 prod0] = a * b
+        // 计算乘积mod 2**256和mod 2**256 - 1
         // Compute the product mod 2**256 and mod 2**256 - 1
+        // 然后利用中国余数定理进行重构
         // then use the Chinese Remainder Theorem to reconstruct
+        // 512位的结果。结果存储在两个256中
         // the 512 bit result. The result is stored in two 256
+        // product = prod1 *2 **256 + prod0 . xml的变量
         // variables such that product = prod1 * 2**256 + prod0
-        uint256 prod0; // Least significant 256 bits of the product
-        uint256 prod1; // Most significant 256 bits of the product
+        uint256 prod0; // Least significant 256 bits of the product 乘积的最低有效256位
+        uint256 prod1; // Most significant 256 bits of the product 乘积的最高256位
         assembly {
             let mm := mulmod(a, b, not(0))
             prod0 := mul(a, b)

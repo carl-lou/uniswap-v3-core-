@@ -5,7 +5,9 @@ import './interfaces/IUniswapV3Pool.sol';
 
 import './NoDelegateCall.sol';
 
+// 优化溢出和下溢 安全的数学操作
 import './libraries/LowGasSafeMath.sol';
+
 import './libraries/SafeCast.sol';
 import './libraries/Tick.sol';
 import './libraries/TickBitmap.sol';
@@ -28,46 +30,58 @@ import './interfaces/callback/IUniswapV3SwapCallback.sol';
 import './interfaces/callback/IUniswapV3FlashCallback.sol';
 
 contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
+    // 防止溢出下溢，并节约gas费， 作用于uint256/int256类型
     using LowGasSafeMath for uint256;
     using LowGasSafeMath for int256;
+    // 安全类型转换
     using SafeCast for uint256;
     using SafeCast for int256;
+    
+    // 刻度的数据结构
     using Tick for mapping(int24 => Tick.Info);
     using TickBitmap for mapping(int16 => uint256);
+
     using Position for mapping(bytes32 => Position.Info);
     using Position for Position.Info;
+
     using Oracle for Oracle.Observation[65535];
 
+    /// @inheritdoc IUniswapV3PoolImmutables 
+    // immutable构造函数之外不可修改 
+    address public immutable override factory;//工厂合约地址
     /// @inheritdoc IUniswapV3PoolImmutables
-    address public immutable override factory;
+    address public immutable override token0;//数值小的token地址
     /// @inheritdoc IUniswapV3PoolImmutables
-    address public immutable override token0;
+    address public immutable override token1;//数值大的token地址
     /// @inheritdoc IUniswapV3PoolImmutables
-    address public immutable override token1;
-    /// @inheritdoc IUniswapV3PoolImmutables
-    uint24 public immutable override fee;
+    uint24 public immutable override fee;//税费
 
     /// @inheritdoc IUniswapV3PoolImmutables
-    int24 public immutable override tickSpacing;
+    int24 public immutable override tickSpacing;//很小的价格区间
 
     /// @inheritdoc IUniswapV3PoolImmutables
-    uint128 public immutable override maxLiquidityPerTick;
+    uint128 public immutable override maxLiquidityPerTick;//每个价格区间，最大的流动性（流动性资金数量）
 
+    // 插槽 数据结构
     struct Slot0 {
-        // the current price
+        // the current price 当前价格
         uint160 sqrtPriceX96;
-        // the current tick
+        // the current tick 当前刻度
         int24 tick;
-        // the most-recently updated index of the observations array
+        // 最近更新的观测值数组索引
+        // the most-recently updated index of the observations array 
         uint16 observationIndex;
         // the current maximum number of observations that are being stored
+        // 当前储存的最大观测数值
         uint16 observationCardinality;
+        // 在observation .write中触发的下一个要存储的最大观察数
         // the next maximum number of observations to store, triggered in observations.write
         uint16 observationCardinalityNext;
+        // 当前协议费用  提现时交换费用的百分比，表示为整数分母(1/x)%
         // the current protocol fee as a percentage of the swap fee taken on withdrawal
         // represented as an integer denominator (1/x)%
-        uint8 feeProtocol;
-        // whether the pool is locked
+        uint8 feeProtocol;//协议费用
+        // whether the pool is locked 存储池是否被锁定
         bool unlocked;
     }
     /// @inheritdoc IUniswapV3PoolState
@@ -96,20 +110,30 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
     /// @inheritdoc IUniswapV3PoolState
     mapping(bytes32 => Position.Info) public override positions;
     /// @inheritdoc IUniswapV3PoolState
+    // 
     Oracle.Observation[65535] public override observations;
 
+    // 一个方法在池中的互斥重入保护。该方法还可以防止在池初始化之前进入函数。
+    // 在整个合约中都需要重入保护，因为我们使用余额检查来确定交互的支付状态，如mint、swap和flash。
     /// @dev Mutually exclusive reentrancy protection into the pool to/from a method. This method also prevents entrance
     /// to a function before the pool is initialized. The reentrancy guard is required throughout the contract because
     /// we use balance checks to determine the payment status of interactions such as mint, swap and flash.
     modifier lock() {
+        // 要求unlocked==true，没被锁住，否则报错“LOK"
         require(slot0.unlocked, 'LOK');
+        // 置为false，也就是锁住
         slot0.unlocked = false;
+        // 执行用这个modifier的方法的代码
         _;
+        // 执行完代码后，重置为true
         slot0.unlocked = true;
     }
 
     /// @dev Prevents calling a function from anyone except the address returned by IUniswapV3Factory#owner()
     modifier onlyFactoryOwner() {
+        // IUniswapV3Factory 是一个Interface接口，IUniswapV3Factory()   括号内传入factory合约地址可以返回 已经部署上去的继承了该IUniswapV3Factory接口的合约
+        //interface用法参考 https://www.pangzai.win/%E3%80%90solidity%E3%80%91interface%E7%9A%84%E4%BD%BF%E7%94%A8%E6%96%B9%E6%B3%95/
+        // 要求调用者必须是工厂合约的所有者
         require(msg.sender == IUniswapV3Factory(factory).owner());
         _;
     }
@@ -117,15 +141,21 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
     constructor() {
         int24 _tickSpacing;
         (factory, token0, token1, fee, _tickSpacing) = IUniswapV3PoolDeployer(msg.sender).parameters();
+        // 价格刻度 间距 部署后，不可修改
         tickSpacing = _tickSpacing;
 
+        // 每个刻度最大的流动性
         maxLiquidityPerTick = Tick.tickSpacingToMaxLiquidityPerTick(_tickSpacing);
     }
 
+    // 有效tick输入的 常规检查，Low需小于Upper，小于最大刻度，大于最小刻度
     /// @dev Common checks for valid tick inputs.
     function checkTicks(int24 tickLower, int24 tickUpper) private pure {
+        // 要求tickLower 应该小于 tickUpper
         require(tickLower < tickUpper, 'TLU');
+        // tickLower 大于最小值 -887272
         require(tickLower >= TickMath.MIN_TICK, 'TLM');
+        // tickUpper 需要小于最大值 887272
         require(tickUpper <= TickMath.MAX_TICK, 'TUM');
     }
 
@@ -134,17 +164,27 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
         return uint32(block.timestamp); // truncation is desired
     }
 
+    // 获取池子里token0的余额
     /// @dev Get the pool's balance of token0
+    // 此函数经过gas优化，以避免在返回数据大小检查之外，还进行冗余的额外代码数量检查
     /// @dev This function is gas optimized to avoid a redundant extcodesize check in addition to the returndatasize
     /// check
     function balance0() private view returns (uint256) {
+
+        // 这staticcall方法允许一个合约调用另一个合约（或它自己）而不修改状态。
+        // 参考https://cryptoguide.dev/post/guide-to-solidity's-staticcall-and-how-to-use-it/
         (bool success, bytes memory data) = token0.staticcall(
+            // IERC20Minimal接口里的查询余额方法，其实也就是查询当前地址
+            // encodeWithSelector是一种通过selector进行加密的方式，同类的还有encodeWithSignature
             abi.encodeWithSelector(IERC20Minimal.balanceOf.selector, address(this))
         );
+        // 调用需要成功，success需要等于true
         require(success && data.length >= 32);
+        // 把字节 数据结构 转换成 uint256数字
         return abi.decode(data, (uint256));
     }
 
+    // 获取池子里token1的余额
     /// @dev Get the pool's balance of token1
     /// @dev This function is gas optimized to avoid a redundant extcodesize check in addition to the returndatasize
     /// check
@@ -169,7 +209,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
         )
     {
         checkTicks(tickLower, tickUpper);
-
+        // 累计刻度最小值
         int56 tickCumulativeLower;
         int56 tickCumulativeUpper;
         uint160 secondsPerLiquidityOutsideLowerX128;
@@ -178,6 +218,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
         uint32 secondsOutsideUpper;
 
         {
+            // mapping(int24 => Tick.Info) public override ticks;
             Tick.Info storage lower = ticks[tickLower];
             Tick.Info storage upper = ticks[tickUpper];
             bool initializedLower;
@@ -199,6 +240,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
             require(initializedUpper);
         }
 
+        // 上面定义的Slot0 public override slot0;
         Slot0 memory _slot0 = slot0;
 
         if (_slot0.tick < tickLower) {
@@ -278,6 +320,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
 
         (uint16 cardinality, uint16 cardinalityNext) = observations.initialize(_blockTimestamp());
 
+        // 新建一个Slot0实例
         slot0 = Slot0({
             sqrtPriceX96: sqrtPriceX96,
             tick: tick,

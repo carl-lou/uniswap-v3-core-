@@ -7,44 +7,63 @@ import './SafeCast.sol';
 import './TickMath.sol';
 import './LiquidityMath.sol';
 
-/// @title Tick
+/// @title Tick  一段很小的价格区间
+// 包含管理参数流程和相关计算的函数
 /// @notice Contains functions for managing tick processes and relevant calculations
 library Tick {
     using LowGasSafeMath for int256;
     using SafeCast for int256;
 
+    // 存储在每个初始化的 单个刻度 上的信息
     // info stored for each initialized individual tick
     struct Info {
+        // 总位置流动性引用这一项,总流动性
         // the total position liquidity that references this tick
         uint128 liquidityGross;
+        // 从左到右交叉(从右到左)时增加(减去)净流动性的数量，净流动性
         // amount of net liquidity added (subtracted) when tick is crossed from left to right (right to left),
         int128 liquidityNet;
+        // 在这个刻度的另一侧，每单位流动性的费用增长(相对于当前刻度)只有相对意义，
+        // 而不是绝对意义——该值取决于刻度初始化的时间
         // fee growth per unit of liquidity on the _other_ side of this tick (relative to the current tick)
         // only has relative meaning, not absolute — the value depends on when the tick is initialized
         uint256 feeGrowthOutside0X128;
         uint256 feeGrowthOutside1X128;
+        // 在刻度的另一侧的累积刻度值
         // the cumulative tick value on the other side of the tick
         int56 tickCumulativeOutside;
+
+        // 在刻度的另一侧(相对于当前刻度)，
+        // 每单位流动性的秒数只有相对意义，而不是绝对意义——该值取决于刻度初始化的时间
         // the seconds per unit of liquidity on the _other_ side of this tick (relative to the current tick)
         // only has relative meaning, not absolute — the value depends on when the tick is initialized
         uint160 secondsPerLiquidityOutsideX128;
         // the seconds spent on the other side of the tick (relative to the current tick)
         // only has relative meaning, not absolute — the value depends on when the tick is initialized
         uint32 secondsOutside;
+        // 如果tick已初始化，即该值完全等价于表达式liquidityGross != 0这8位被设置为防止在穿越新初始化的tick时进行新鲜存储
         // true iff the tick is initialized, i.e. the value is exactly equivalent to the expression liquidityGross != 0
         // these 8 bits are set to prevent fresh sstores when crossing newly initialized ticks
         bool initialized;
     }
 
+    // 从给定的 价格区间 中获得每滴答的最大流动性
     /// @notice Derives max liquidity per tick from given tick spacing
+    // 在Poll池子合约的 构造函数中执行
     /// @dev Executed within the pool constructor
     /// @param tickSpacing The amount of required tick separation, realized in multiples of `tickSpacing`
     ///     e.g., a tickSpacing of 3 requires ticks to be initialized every 3rd tick i.e., ..., -6, -3, 0, 3, 6, ...
     /// @return The max liquidity per tick
     function tickSpacingToMaxLiquidityPerTick(int24 tickSpacing) internal pure returns (uint128) {
+        // 最小价格区间,相当于就是 TickMath.MIN_TICK  -887272
+        // tickSpacing 在工厂合约里默认有3种，是10/60/200
         int24 minTick = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
+        // 最大价格区间 887272
         int24 maxTick = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
+        // 相当于maxTick*2/tickSpacing +1   ==  (887272+887272)/10 +1 == 177,454.4 +1 == 177,455.4
+        // uint24最大值是 2**24 -1 == 16,777,216 -1 == 16,777,215
         uint24 numTicks = uint24((maxTick - minTick) / tickSpacing) + 1;
+        // type(uint128).max是 2**128-1 ， 那么也就是  (2**128-1)/177,455.4   ==  1.91756e+33  == 1.91756 * 10**33
         return type(uint128).max / numTicks;
     }
 

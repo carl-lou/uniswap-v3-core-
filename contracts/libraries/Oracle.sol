@@ -2,16 +2,25 @@
 pragma solidity >=0.5.0 <0.8.0;
 
 /// @title Oracle
+// 为各种系统设计提供有用的价格和流动性数据
 /// @notice Provides price and liquidity data useful for a wide variety of system designs
+// 存储的oracle数据的实例，“观察”，收集在oracle数组中
 /// @dev Instances of stored oracle data, "observations", are collected in the oracle array
+// 每个池初始化的oracle数组长度为1。
+// 任何人都可以通过支付SSTOREs来增加oracle数组的最大长度。
+// 当数组被完全填充时，将添加新的插槽。
 /// Every pool is initialized with an oracle array length of 1. Anyone can pay the SSTOREs to increase the
 /// maximum length of the oracle array. New slots will be added when the array is fully populated.
 /// Observations are overwritten when the full length of the oracle array is populated.
+// 通过将0传递给observe()，可以获得最近的观测值，与oracle数组的长度无关。
 /// The most recent observation is available, independent of the length of the oracle array, by passing 0 to observe()
 library Oracle {
+    // 观察
     struct Observation {
+        // 观察到的区块时间戳
         // the block timestamp of the observation
         uint32 blockTimestamp;
+        // 刻度 累加器，即tick *自池第一次初始化以来所经过的时间
         // the tick accumulator, i.e. tick * time elapsed since the pool was first initialized
         int56 tickCumulative;
         // the seconds per liquidity, i.e. seconds elapsed / max(1, liquidity) since the pool was first initialized
