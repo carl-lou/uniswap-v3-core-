@@ -11,20 +11,25 @@ import './LiquidityMath.sol';
 // 头寸储存额外的状态,以追踪所欠职位的费用
 /// @dev Positions store additional state for tracking fees owed to the position
 library Position {
+    // 存储每个用户头寸的信息
     // info stored for each user's position
     struct Info {
+        // 头寸持有的流动资金
         // the amount of liquidity owned by this position
         uint128 liquidity;
-        // fee growth per unit of liquidity as of the last update to liquidity or fees owed
         // 截至上次更新为流动性或所欠费用时，每单位流动性的费用增长
+        // 此 position 内的手续费总额
+        // fee growth per unit of liquidity as of the last update to liquidity or fees owed
         uint256 feeGrowthInside0LastX128;
+        // 这个值不需要每次都更新，它只会在 position 发生变动，或者用户提取手续费时更新
         uint256 feeGrowthInside1LastX128;
-        // 在token0/token1中欠头寸所有者的费用
+        // 在token0/token1中应给予头寸所有者的费用
         // the fees owed to the position owner in token0/token1
         uint128 tokensOwed0;
         uint128 tokensOwed1;
     }
 
+    // 返回给定所有者和位置边界的位置的Info结构
     /// @notice Returns the Info struct of a position, given an owner and position boundaries
     /// @param self The mapping containing all user positions
     /// @param owner The address of the position owner
@@ -37,9 +42,11 @@ library Position {
         int24 tickLower,
         int24 tickUpper
     ) internal view returns (Position.Info storage position) {
+        // keccak256(abi.encodePacked(owner, tickLower, tickUpper)) 返回一个bytes32的字节数组
         position = self[keccak256(abi.encodePacked(owner, tickLower, tickUpper))];
     }
 
+    // 积分累计到用户头寸的费用
     /// @notice Credits accumulated fees to a user's position
     /// @param self The individual position to update
     /// @param liquidityDelta The change in pool liquidity as a result of the position update

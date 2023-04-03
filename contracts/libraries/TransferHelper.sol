@@ -4,6 +4,7 @@ pragma solidity >=0.6.0;
 import '../interfaces/IERC20Minimal.sol';
 
 /// @title TransferHelper
+// 包含辅助方法，用于与不一致返回true/false的ERC20令牌交互
 /// @notice Contains helper methods for interacting with ERC20 tokens that do not consistently return true/false
 library TransferHelper {
     /// @notice Transfers tokens from msg.sender to a recipient

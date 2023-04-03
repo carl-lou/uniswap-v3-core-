@@ -3,19 +3,30 @@ pragma solidity >=0.5.0;
 
 import './BitMath.sol';
 
+// 打包标记初始化状态库
 /// @title Packed tick initialized state library
+// 存储标记索引到其初始化状态的打包映射
 /// @notice Stores a packed mapping of tick index to its initialized state
+// 映射使用int16作为键，因为tick表示为int24，每个单词有256(2^8)个值。
 /// @dev The mapping uses int16 for keys since ticks are represented as int24 and there are 256 (2^8) values per word.
 library TickBitmap {
+    // 计算tick的初始化位在映射中的头寸
     /// @notice Computes the position in the mapping where the initialized bit for a tick lives
-    /// @param tick The tick for which to compute the position
+    /// @param tick The tick for which to compute the position 要为其计算头寸的刻度,tick索引
+    // 映射中的键，其中包含存储位的word
     /// @return wordPos The key in the mapping containing the word in which the bit is stored
+    // 在word中存储标志的位头寸
     /// @return bitPos The bit position in the word where the flag is stored
     function position(int24 tick) private pure returns (int16 wordPos, uint8 bitPos) {
+        // tick / 2^8 = tick / 256,商为wordPos,余数为bitPos
+        // 1个word是由256个tick组成。
+        // 这里是找到这个tick位于哪个word，第几个word
         wordPos = int16(tick >> 8);
+        // word里的第几位
         bitPos = uint8(tick % 256);
     }
 
+    // 将给定刻度的初始化状态从false翻转为true，反之亦然
     /// @notice Flips the initialized state for a given tick from false to true, or vice versa
     /// @param self The mapping in which to flip the tick
     /// @param tick The tick to flip
@@ -25,12 +36,17 @@ library TickBitmap {
         int24 tick,
         int24 tickSpacing
     ) internal {
+        // 确保tick已经经过tickSpacing舍去余数化了。(Tick / tickSpacing) * tickSpacing;
         require(tick % tickSpacing == 0); // ensure that the tick is spaced
+        // 获取wordPos,bitPos
         (int16 wordPos, uint8 bitPos) = position(tick / tickSpacing);
+        // 相当于2^bitPos
         uint256 mask = 1 << bitPos;
+        // tickBitmap里的wordPos与mask按位异或
         self[wordPos] ^= mask;
     }
 
+// 返回与给定刻度的左(小于或等于)或右(大于)刻度包含在同一word(或相邻word)中的下一个初始化的刻度
     /// @notice Returns the next initialized tick contained in the same word (or adjacent word) as the tick that is either
     /// to the left (less than or equal to) or right (greater than) of the given tick
     /// @param self The mapping in which to compute the next initialized tick
@@ -40,7 +56,7 @@ library TickBitmap {
     /// @return next The next initialized or uninitialized tick up to 256 ticks away from the current tick
     /// @return initialized Whether the next tick is initialized, as the function only searches within up to 256 ticks
     function nextInitializedTickWithinOneWord(
-        mapping(int16 => uint256) storage self,
+        mapping(int16 => uint256) storage self,//表示用了这个方法的变量（这个library会赋予给某些变量，一般为 tickBitmap）
         int24 tick,
         int24 tickSpacing,
         bool lte

@@ -117,6 +117,7 @@ library SqrtPriceMath {
                 : getNextSqrtPriceFromAmount1RoundingDown(sqrtPX96, liquidity, amountIn, true);
     }
 
+    // 在给定token0或token1的输出量的情况下，获取下一个平方根价格
     /// @notice Gets the next sqrt price given an output amount of token0 or token1
     /// @dev Throws if price or liquidity are 0 or the next price is out of bounds
     /// @param sqrtPX96 The starting price before accounting for the output amount
@@ -140,30 +141,38 @@ library SqrtPriceMath {
                 : getNextSqrtPriceFromAmount0RoundingUp(sqrtPX96, liquidity, amountOut, false);
     }
 
+    // 获得两个价格之间需要多少的amount0变化量
     /// @notice Gets the amount0 delta between two prices
     /// @dev Calculates liquidity / sqrt(lower) - liquidity / sqrt(upper),
     /// i.e. liquidity * (sqrt(upper) - sqrt(lower)) / (sqrt(upper) * sqrt(lower))
     /// @param sqrtRatioAX96 A sqrt price
     /// @param sqrtRatioBX96 Another sqrt price
     /// @param liquidity The amount of usable liquidity
+    // 是否向上取整
     /// @param roundUp Whether to round the amount up or down
     /// @return amount0 Amount of token0 required to cover a position of size liquidity between the two passed prices
     function getAmount0Delta(
-        uint160 sqrtRatioAX96,
+        uint160 sqrtRatioAX96, //
         uint160 sqrtRatioBX96,
         uint128 liquidity,
         bool roundUp
     ) internal pure returns (uint256 amount0) {
+        // 大的排前面，大的为A
         if (sqrtRatioAX96 > sqrtRatioBX96) (sqrtRatioAX96, sqrtRatioBX96) = (sqrtRatioBX96, sqrtRatioAX96);
-
+        // 左移96位，乘以2^96， 浮点数转换为 96位小数的Q格式定点数
         uint256 numerator1 = uint256(liquidity) << FixedPoint96.RESOLUTION;
+        // 输入的两个价格差
         uint256 numerator2 = sqrtRatioBX96 - sqrtRatioAX96;
-
+        // tokenA的平方价格 需要大于0，下面会拿sqrtRatioAX96作为分母
         require(sqrtRatioAX96 > 0);
 
         return
+            // 是否向上取整
+            // （流动性×价格差/小的价格）/大的价格 = 流动性×(价格差/(小的价格*大的价格))
             roundUp
-                ? UnsafeMath.divRoundingUp(
+                ? // divRoundingUp是没有做安全检查的 向上取整的除法（sqrtRatioAX96不为0）
+                UnsafeMath.divRoundingUp(
+                    // 向上取整（numerator1×numerator2/sqrtRatioBX96）
                     FullMath.mulDivRoundingUp(numerator1, numerator2, sqrtRatioBX96),
                     sqrtRatioAX96
                 )
@@ -186,6 +195,7 @@ library SqrtPriceMath {
         if (sqrtRatioAX96 > sqrtRatioBX96) (sqrtRatioAX96, sqrtRatioBX96) = (sqrtRatioBX96, sqrtRatioAX96);
 
         return
+        // （liquidity * -价格差 ）/2^96,  转换为浮点数
             roundUp
                 ? FullMath.mulDivRoundingUp(liquidity, sqrtRatioBX96 - sqrtRatioAX96, FixedPoint96.Q96)
                 : FullMath.mulDiv(liquidity, sqrtRatioBX96 - sqrtRatioAX96, FixedPoint96.Q96);

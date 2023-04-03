@@ -7,6 +7,7 @@ pragma solidity >=0.5.0 <0.8.0;
 library TickMath {
     // 可以传递给#getSqrtRatioAtTick的最小刻度，从log以1.0001为基数的2**-128计算
     /// @dev The minimum tick that may be passed to #getSqrtRatioAtTick computed from log base 1.0001 of 2**-128
+    // 887272= 2^64,  上下限为什么是2^64,是由于 价格 根号P以Q64.96精度的定点数来储存
     int24 internal constant MIN_TICK = -887272;
     /// @dev The maximum tick that may be passed to #getSqrtRatioAtTick computed from log base 1.0001 of 2**128
     int24 internal constant MAX_TICK = -MIN_TICK;
@@ -17,15 +18,20 @@ library TickMath {
     /// @dev The maximum value that can be returned from #getSqrtRatioAtTick. Equivalent to getSqrtRatioAtTick(MAX_TICK)
     uint160 internal constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
 
-    /// @notice Calculates sqrt(1.0001^tick) * 2^96
+    // 根据传入的刻度，返回一个平方价，计算规则为  平方根(1.0001^tick) * 2^96
+    /// @notice Calculates sqrt(1.0001^tick) * 2^96 
     /// @dev Throws if |tick| > max tick
-    /// @param tick The input tick for the above formula
+    /// @param tick The input tick for the above formula 上面公式的输入刻度
+    // sqrtPriceX96一个定点Q64.96数字，表示两个资产之比的平方根(token1/token0)
     /// @return sqrtPriceX96 A Fixed point Q64.96 number representing the sqrt of the ratio of the two assets (token1/token0)
     /// at the given tick
     function getSqrtRatioAtTick(int24 tick) internal pure returns (uint160 sqrtPriceX96) {
+        // 获取传入参数tick刻度的绝对值
         uint256 absTick = tick < 0 ? uint256(-int256(tick)) : uint256(int256(tick));
+        // 绝对值需要小于 最大的刻度
         require(absTick <= uint256(MAX_TICK), 'T');
-
+        
+        // 1/sqrt(1.0001)^1,  1/sqrt(1.0001)^2,
         uint256 ratio = absTick & 0x1 != 0 ? 0xfffcb933bd6fad37aa2d162d1a594001 : 0x100000000000000000000000000000000;
         if (absTick & 0x2 != 0) ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128;
         if (absTick & 0x4 != 0) ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128;
@@ -49,13 +55,18 @@ library TickMath {
 
         if (tick > 0) ratio = type(uint256).max / ratio;
 
+        // 这除以1<<32四舍五入，从Q128.128到Q128.96。
         // this divides by 1<<32 rounding up to go from a Q128.128 to a Q128.96.
+        // 然后向下转换，因为我们知道由于tick输入限制，结果总是适合160位以内
         // we then downcast because we know the result always fits within 160 bits due to our tick input constraint
+        // 我们在除法中四舍五入，所以输出价格的getTickAtSqrtRatio总是一致的
         // we round up in the division so getTickAtSqrtRatio of the output price is always consistent
         sqrtPriceX96 = uint160((ratio >> 32) + (ratio % (1 << 32) == 0 ? 0 : 1));
     }
 
+    // 计算最大的刻度值，使getRatioAtTick(tick) <= ratio
     /// @notice Calculates the greatest tick value such that getRatioAtTick(tick) <= ratio
+    // 在sqrtPriceX96 < MIN_SQRT_RATIO时抛出，因为MIN_SQRT_RATIO是getRatioAtTick可能返回的最小值。
     /// @dev Throws in case sqrtPriceX96 < MIN_SQRT_RATIO, as MIN_SQRT_RATIO is the lowest value getRatioAtTick may
     /// ever return.
     /// @param sqrtPriceX96 The sqrt ratio for which to compute the tick as a Q64.96
@@ -63,6 +74,7 @@ library TickMath {
     function getTickAtSqrtRatio(uint160 sqrtPriceX96) internal pure returns (int24 tick) {
         // second inequality must be < because the price can never reach the price at the max tick
         require(sqrtPriceX96 >= MIN_SQRT_RATIO && sqrtPriceX96 < MAX_SQRT_RATIO, 'R');
+        // 二进制里所有数字 左位移32位，相当于乘 2^32
         uint256 ratio = uint256(sqrtPriceX96) << 32;
 
         uint256 r = ratio;

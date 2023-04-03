@@ -8,7 +8,7 @@ pragma solidity >=0.4.0 <0.8.0;
 // 处理“幽灵溢出”即。,允许乘法和除法,中间值超过256位
 /// @dev Handles "phantom overflow" i.e., allows multiplication and division where an intermediate value overflows 256 bits
 library FullMath {
-    // 用完全精度计算地板(a×b的分母)。如果结果溢出uint256或分母= 0,抛出
+    // 用完全精度计算地板(a×b/denominator)。如果结果溢出uint256或分母= 0,抛错
     /// @notice Calculates floor(a×b÷denominator) with full precision. Throws if result overflows a uint256 or denominator == 0
     /// @param a The multiplicand 被乘数
     /// @param b The multiplier  倍增器
@@ -22,7 +22,7 @@ library FullMath {
         uint256 denominator//分母
         // 内部，纯函数
     ) internal pure returns (uint256 result) {
-        // 512位乘 [产品1 产品0] = a * b
+        // 512位乘 [属性1 属性0] = a * b
         // 512-bit multiply [prod1 prod0] = a * b
         // 计算乘积mod 2**256和mod 2**256 - 1
         // Compute the product mod 2**256 and mod 2**256 - 1
@@ -35,8 +35,13 @@ library FullMath {
         uint256 prod0; // Least significant 256 bits of the product 乘积的最低有效256位
         uint256 prod1; // Most significant 256 bits of the product 乘积的最高256位
         assembly {
+            // not(x),表示 X 的按位“不”(x 的每一位都被否定)
+            // not(0)也就是 二进制里全都是1
+            // (x * y)% k ,a*b的积 在对not(0)取余数
             let mm := mulmod(a, b, not(0))
             prod0 := mul(a, b)
+            // sub(mm, prod0)表示mm-prod0
+            // lt(mm,prod0)表示如果 mm < prod0，则为1，否则为0
             prod1 := sub(sub(mm, prod0), lt(mm, prod0))
         }
 
@@ -116,6 +121,7 @@ library FullMath {
         return result;
     }
 
+    // 若除法不能整除，向上取整（a×b/denominator）；  若溢出或者denominator分母为0，则报错
     /// @notice Calculates ceil(a×b÷denominator) with full precision. Throws if result overflows a uint256 or denominator == 0
     /// @param a The multiplicand
     /// @param b The multiplier
@@ -126,6 +132,7 @@ library FullMath {
         uint256 b,
         uint256 denominator
     ) internal pure returns (uint256 result) {
+        // a×b/denominator
         result = mulDiv(a, b, denominator);
         if (mulmod(a, b, denominator) > 0) {
             require(result < type(uint256).max);

@@ -12,7 +12,7 @@ uniswap 实验室：开发Uniswap协议和web界面的公司。
 Uniswap Labs: The company which developed the Uniswap protocol, along with the web interface.
 
 Uniswap协议： 一套持久的、不可升级的智能合约，共同创建了一个自动化的做市商，
-这是一种在以太坊区块链上促进点对点做市和交换ERC-20令牌的协议。
+这是一种在以太坊区块链上促进点对点做市和交换ERC-20token的协议。
 The Uniswap Protocol: A suite of persistent, non-upgradable smart contracts 
 that together create an automated market maker, a protocol that facilitates 
 peer-to-peer market making and swapping of ERC-20 tokens on the Ethereum blockchain.
@@ -27,19 +27,19 @@ Uniswap Governance: A governance system for governing the Uniswap Protocol, enab
 */
 
 
-
 // 想要这些笔记+注释过的代码， 加我**微信loulan0176**进群获取
 
 // 觉得我讲得还行，也可以关注我  
 
 // 微信公众号/抖音/bilibili 
 
-// **逐星web3**
+// **逐星web3** 区块恋
 
 // 会不断发表市场上比较稀缺的一些 项目案例分析，代码分析。
 
 
 
+// 代码是23年的，和以前的代码会不同；  国内也有其他解析uniswap的，不过最新的几乎没有，逐行讲解的，我也还没找到过。
 
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity =0.7.6;
@@ -76,21 +76,23 @@ contract UniswapV3Factory is IUniswapV3Factory, UniswapV3PoolDeployer, NoDelegat
         // 改变owner所有人 的日志，从0地址改为部署者的地址
         emit OwnerChanged(address(0), msg.sender);
         
+        // 以 1000000 为基数，即5%为500
         // 初始化写死三种费率，以及费率对应的刻度间隔，
+        //  每个实际用到的tick之间 跳过几个 不用的tick
         // 用于三种情况 稳定币对稳定币， 稳定币对波动大的币， 波动大的币对波动大的币
-        feeAmountTickSpacing[500] = 10;//稳定币对稳定币，万分之5
+        feeAmountTickSpacing[500] = 10;//稳定币对稳定币，万分之5,    稳定币波动小，需要比较密集的价格刻度，刻度间隔为10,10个tick作为一个实际的间距
         emit FeeAmountEnabled(500, 10);
         feeAmountTickSpacing[3000] = 60;//稳定币对波动大的币，千分之3
         emit FeeAmountEnabled(3000, 60);
-        feeAmountTickSpacing[10000] = 200;//波动大的币对波动大的币，万分之一
+        feeAmountTickSpacing[10000] = 200;//波动大的币对波动大的币，万分之一。 价格刻度间隔 是稳定币的20倍
         emit FeeAmountEnabled(10000, 200);
     }
 
     /// @inheritdoc IUniswapV3Factory
     // 创建一个流动性池子，这个池子由tokenA和tokenB组成，并设定交易手续费
     function createPool(
-        address tokenA,
-        address tokenB,
+        address tokenA,//WETH  ERC20
+        address tokenB,//USDC
         uint24 fee//500，或者3000，10000 ，也可以其他
     ) external override noDelegateCall returns (address pool) {
         // 两个token的地址不能一样
@@ -100,7 +102,7 @@ contract UniswapV3Factory is IUniswapV3Factory, UniswapV3PoolDeployer, NoDelegat
         (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         // 不能是0地址
         require(token0 != address(0));
-        // 刻度间隔 是10，或者60，200
+        // 刻度间隔 是10，或者60，200,  每个实际用到的tick之间 跳过几个 不用的tick
         int24 tickSpacing = feeAmountTickSpacing[fee];
         // 也就是fee不能是500，3000，10000之外的数字，因为构造函数里只存了这三个数，
         // 若传入的fee是另外的数字，则feeAmountTickSpacing[fee]会是0
@@ -131,6 +133,7 @@ contract UniswapV3Factory is IUniswapV3Factory, UniswapV3PoolDeployer, NoDelegat
 
     /// @inheritdoc IUniswapV3Factory
     // 开启交易手续费，可以增加手续费种类
+    // 也就是同一组代币交易对，会有多种费率，这样会更灵活，但是也会导致流动性分散
     function enableFeeAmount(uint24 fee, int24 tickSpacing) public override {
         // 必须是合约所有者
         require(msg.sender == owner);

@@ -23,8 +23,10 @@ library Oracle {
         // 刻度 累加器，即tick *自池第一次初始化以来所经过的时间
         // the tick accumulator, i.e. tick * time elapsed since the pool was first initialized
         int56 tickCumulative;
+        // 每个流动性的秒数，即自池第一次初始化以来的秒数/最大(1，流动性)
         // the seconds per liquidity, i.e. seconds elapsed / max(1, liquidity) since the pool was first initialized
         uint160 secondsPerLiquidityCumulativeX128;
+        // 观察值是否初始化
         // whether or not the observation is initialized
         bool initialized;
     }
@@ -58,10 +60,10 @@ library Oracle {
     /// @param time The time of the oracle initialization, via block.timestamp truncated to uint32
     /// @return cardinality The number of populated elements in the oracle array
     /// @return cardinalityNext The new length of the oracle array, independent of population
-    function initialize(Observation[65535] storage self, uint32 time)
-        internal
-        returns (uint16 cardinality, uint16 cardinalityNext)
-    {
+    function initialize(
+        Observation[65535] storage self,
+        uint32 time
+    ) internal returns (uint16 cardinality, uint16 cardinalityNext) {
         self[0] = Observation({
             blockTimestamp: time,
             tickCumulative: 0,
@@ -114,11 +116,7 @@ library Oracle {
     /// @param current The current next cardinality of the oracle array
     /// @param next The proposed next cardinality which will be populated in the oracle array
     /// @return next The next cardinality which will be populated in the oracle array
-    function grow(
-        Observation[65535] storage self,
-        uint16 current,
-        uint16 next
-    ) internal returns (uint16) {
+    function grow(Observation[65535] storage self, uint16 current, uint16 next) internal returns (uint16) {
         require(current > 0, 'I');
         // no-op if the passed next value isn't greater than the current next value
         if (next <= current) return current;
@@ -134,16 +132,12 @@ library Oracle {
     /// @param a A comparison timestamp from which to determine the relative position of `time`
     /// @param b From which to determine the relative position of `time`
     /// @return bool Whether `a` is chronologically <= `b`
-    function lte(
-        uint32 time,
-        uint32 a,
-        uint32 b
-    ) private pure returns (bool) {
+    function lte(uint32 time, uint32 a, uint32 b) private pure returns (bool) {
         // if there hasn't been overflow, no need to adjust
         if (a <= time && b <= time) return a <= b;
 
-        uint256 aAdjusted = a > time ? a : a + 2**32;
-        uint256 bAdjusted = b > time ? b : b + 2**32;
+        uint256 aAdjusted = a > time ? a : a + 2 ** 32;
+        uint256 bAdjusted = b > time ? b : b + 2 ** 32;
 
         return aAdjusted <= bAdjusted;
     }
@@ -238,12 +232,15 @@ library Oracle {
         return binarySearch(self, time, target, index, cardinality);
     }
 
+    // 如果在所要的观察时间戳中或之前的观察不存在，则返回。0可以作为' secondsAgo'传递，以返回当前的累积值。
+    // 如果调用的时间戳位于两个观察值之间，则返回恰好位于两个观察值之间的时间戳的反事实累加器值。
     /// @dev Reverts if an observation at or before the desired observation timestamp does not exist.
     /// 0 may be passed as `secondsAgo' to return the current cumulative values.
     /// If called with a timestamp falling between two observations, returns the counterfactual accumulator values
     /// at exactly the timestamp between the two observations.
     /// @param self The stored oracle array
     /// @param time The current block timestamp
+    // 回头看的时间，以秒为单位，在这一点上返回观察结果
     /// @param secondsAgo The amount of time to look back, in seconds, at which point to return an observation
     /// @param tick The current tick
     /// @param index The index of the observation that was most recently written to the observations array
@@ -254,11 +251,11 @@ library Oracle {
     function observeSingle(
         Observation[65535] storage self,
         uint32 time,
-        uint32 secondsAgo,
+        uint32 secondsAgo,//回头看的时间，以秒为单位，在这一点上返回观察结果
         int24 tick,
         uint16 index,
         uint128 liquidity,
-        uint16 cardinality
+        uint16 cardinality//oracle数组中已填充元素的数目
     ) internal view returns (int56 tickCumulative, uint160 secondsPerLiquidityCumulativeX128) {
         if (secondsAgo == 0) {
             Observation memory last = self[index];
