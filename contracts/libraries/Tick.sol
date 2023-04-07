@@ -25,7 +25,8 @@ library Tick {
         // amount of net liquidity added (subtracted) when tick is crossed from left to right (right to left),
         int128 liquidityNet;
         // token0的外侧累计费用
-        // 在这个刻度的外侧（外侧需要看 目标tick在当前tick区间的左侧还是右侧，若在左侧，那外侧就是目标tick的左侧; 若在右侧则外侧就是目标tick的右侧），
+        // 在这个刻度的外侧（外侧需要看 目标tick在当前tick区间的左侧还是右侧，若在左侧（当前tick>目标tick)，那外侧就是目标tick的左侧; 
+        // 若在右侧(当前tick<目标tick)则外侧就是目标tick的右侧），
         // 每单位流动性的费用增长(相对于当前刻度)只有相对意义，
         // 而不是绝对意义——该值取决于刻度初始化的时间
         // fee growth per unit of liquidity on the _other_ side of this tick (relative to the current tick)
@@ -99,9 +100,11 @@ library Tick {
         uint256 feeGrowthBelow0X128;
         uint256 feeGrowthBelow1X128;
         if (tickCurrent >= tickLower) {
+            // 若当前刻度 >= 头寸做市范围下限，那lower.feeGrowthOutside0X128就是低于tickLower的费用累积
             feeGrowthBelow0X128 = lower.feeGrowthOutside0X128;
             feeGrowthBelow1X128 = lower.feeGrowthOutside1X128;
         } else {
+            // 若tickCurrent < tickLower，这时候的feeGrowthOutside0X128 则是tickLower右侧部分的累计费用，需要全局费用减一下
             feeGrowthBelow0X128 = feeGrowthGlobal0X128 - lower.feeGrowthOutside0X128;
             feeGrowthBelow1X128 = feeGrowthGlobal1X128 - lower.feeGrowthOutside1X128;
         }
@@ -111,12 +114,15 @@ library Tick {
         uint256 feeGrowthAbove0X128;
         uint256 feeGrowthAbove1X128;
         if (tickCurrent < tickUpper) {
+            // 这时候tickUpper的右侧就是外侧
             feeGrowthAbove0X128 = upper.feeGrowthOutside0X128;
             feeGrowthAbove1X128 = upper.feeGrowthOutside1X128;
         } else {
+            // 这时候tickUpper的左侧就是外侧
             feeGrowthAbove0X128 = feeGrowthGlobal0X128 - upper.feeGrowthOutside0X128;
             feeGrowthAbove1X128 = feeGrowthGlobal1X128 - upper.feeGrowthOutside1X128;
         }
+
         // 所有价格累计总费用 减去小于lower,大于upper的fee，剩下的就是当前postion里的fee
         feeGrowthInside0X128 = feeGrowthGlobal0X128 - feeGrowthBelow0X128 - feeGrowthAbove0X128;
         feeGrowthInside1X128 = feeGrowthGlobal1X128 - feeGrowthBelow1X128 - feeGrowthAbove1X128;
@@ -153,7 +159,7 @@ library Tick {
         uint160 secondsPerLiquidityCumulativeX128,
         int56 tickCumulative,
         uint32 time,
-        bool upper,
+        bool upper,//是否是上边界更新
         uint128 maxLiquidity
     ) internal returns (bool flipped) {
         // 获取当前tick索引下的详细Tick信息
@@ -180,10 +186,11 @@ library Tick {
             if (tick <= tickCurrent) {
                 // 若要更新的tick小于当前价格的tick
 
-                // 假设初始化之前，所有的交易都发生在低于tick价格的范围里。 也就是global所有的fee就是外侧费用
+                // 假设初始化之前，所有的交易都发生在低于目标tick价格的范围里。 也就是global所有的fee就是外侧费用
                 // 这个假设不一定符合真实情况，但是由于在最终的结算中，因为涉及到Lower/upper tick的减法，所以这个假设并不会对最终的结果造成误差
                 info.feeGrowthOutside0X128 = feeGrowthGlobal0X128;
                 info.feeGrowthOutside1X128 = feeGrowthGlobal1X128;
+                // 更新预言机里的信息
                 info.secondsPerLiquidityOutsideX128 = secondsPerLiquidityCumulativeX128;
                 info.tickCumulativeOutside = tickCumulative;
                 info.secondsOutside = time;
@@ -194,13 +201,25 @@ library Tick {
         // 流动性在info里更新一下
         info.liquidityGross = liquidityGrossAfter;
 
-        // liquidityNet是指经过这个tick时需要变化多少流动性
+        // liquidityNet 中记录的就是当从左至右穿过这个 tick 时，需要增减的流动性，
+        // 当其为 lower tick 时，其值为正，当其为 upper tick 时，其值为负。对于从右至左穿过的情况，只需将 liquidityNet 的值去翻即可完成计算。
+
         // 当下(上)刻度从左到右(从右到左)交叉时，必须添加(删除)流动性
         // when the lower (upper) tick is crossed left to right (right to left), liquidity must be added (removed)
         info.liquidityNet = upper
-            ? // 假设原来是0，那这一次相当于就是-liquidityDelta
+            ? 
+            // 上边界 需要在原来的流动性变量基础上减少，
+            // 假设原来是0，那这一次相当于就是-liquidityDelta
             int256(info.liquidityNet).sub(liquidityDelta).toInt128()
+            // 下边界是增加流动性
             : int256(info.liquidityNet).add(liquidityDelta).toInt128();
+
+            // 如现在整个交易池里只有2个头寸Postion
+            // 第一个头寸的tickLower是 0.1，tickUpper是0.3，流动性是10
+            // 第二个头寸的tickLower是 0.3,tickUpper是0.7，流动性是20
+            // 那么tick 0.1上的LiquidityNet是10，liquidityGross==10
+            // tick 0.3上的liquidityNet是20-10=10，liquidityGross==30
+            // tick 0.5 上的liquidityNet是-20，liquidityGross==20
     }
 
     /// @notice Clears tick data

@@ -53,23 +53,32 @@ library Position {
     /// @param feeGrowthInside0X128 The all-time fee growth in token0, per unit of liquidity, inside the position's tick boundaries
     /// @param feeGrowthInside1X128 The all-time fee growth in token1, per unit of liquidity, inside the position's tick boundaries
     function update(
-        Info storage self,
+        Info storage self,//头寸详情
         int128 liquidityDelta,
         uint256 feeGrowthInside0X128,
         uint256 feeGrowthInside1X128
     ) internal {
         Info memory _self = self;
 
+        // 之后要更新的流动性
         uint128 liquidityNext;
         if (liquidityDelta == 0) {
+            // 没有流动性变化
+            // 原本流动性必须大于0
             require(_self.liquidity > 0, 'NP'); // disallow pokes for 0 liquidity positions
+            // 之后的流动性也还是00
             liquidityNext = _self.liquidity;
         } else {
+            // 加上流动性变量（流动性变量liquidityDelta可能是负值）
             liquidityNext = LiquidityMath.addDelta(_self.liquidity, liquidityDelta);
         }
 
         // calculate accumulated fees
+        // 计算累计费用
         uint128 tokensOwed0 = uint128(
+            // 除FixedPoint128.Q128是转换成浮点数
+            // 这次累计费用-上次累积费用=费用变量
+            // 费用变量 * 流动性 = 应支付的token0费用
             FullMath.mulDiv(feeGrowthInside0X128 - _self.feeGrowthInside0LastX128, _self.liquidity, FixedPoint128.Q128)
         );
         uint128 tokensOwed1 = uint128(
@@ -77,7 +86,9 @@ library Position {
         );
 
         // update the position
+        // 更新流动性
         if (liquidityDelta != 0) self.liquidity = liquidityNext;
+        // 更新累计费用
         self.feeGrowthInside0LastX128 = feeGrowthInside0X128;
         self.feeGrowthInside1LastX128 = feeGrowthInside1X128;
         if (tokensOwed0 > 0 || tokensOwed1 > 0) {

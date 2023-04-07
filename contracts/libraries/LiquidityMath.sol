@@ -9,6 +9,7 @@ library LiquidityMath {
     /// @return z The liquidity delta
     function addDelta(uint128 x, int128 y) internal pure returns (uint128 z) {
         if (y < 0) {
+            // 需要先转化成uint128类型，才能加减
             require((z = x - uint128(-y)) < x, 'LS');
         } else {
             require((z = x + uint128(y)) >= x, 'LA');

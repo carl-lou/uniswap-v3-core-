@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity >=0.5.0 <0.8.0;
 
+// Oracle 数据的更新发生在价格变动的时候
+
 /// @title Oracle
 // 为各种系统设计提供有用的价格和流动性数据
 /// @notice Provides price and liquidity data useful for a wide variety of system designs
@@ -20,9 +22,11 @@ library Oracle {
         // 观察到的区块时间戳
         // the block timestamp of the observation
         uint32 blockTimestamp;
-        // 刻度 累加器，即tick *自池第一次初始化以来所经过的时间
+        // tick index 的时间加权累积值
+        // 刻度 累加器，即tickIndex * 自池第一次初始化以来所经过的时间
         // the tick accumulator, i.e. tick * time elapsed since the pool was first initialized
         int56 tickCumulative;
+        // 价格所在区间的流动性的时间加权累积值
         // 每个流动性的秒数，即自池第一次初始化以来的秒数/最大(1，流动性)
         // the seconds per liquidity, i.e. seconds elapsed / max(1, liquidity) since the pool was first initialized
         uint160 secondsPerLiquidityCumulativeX128;
@@ -44,32 +48,40 @@ library Oracle {
         int24 tick,
         uint128 liquidity
     ) private pure returns (Observation memory) {
+        // 上次Oracle数据和本次的时间差
         uint32 delta = blockTimestamp - last.blockTimestamp;
         return
             Observation({
                 blockTimestamp: blockTimestamp,
+                // 计算tick INdex的时间加权累积值
                 tickCumulative: last.tickCumulative + int56(tick) * delta,
+                // 时间差/流动性， 每份流动性的秒数
                 secondsPerLiquidityCumulativeX128: last.secondsPerLiquidityCumulativeX128 +
                     ((uint160(delta) << 128) / (liquidity > 0 ? liquidity : 1)),
                 initialized: true
             });
     }
 
+    // 通过写入第一个槽来初始化oracle数组。对于观测数组的生命周期调用一次
     /// @notice Initialize the oracle array by writing the first slot. Called once for the lifecycle of the observations array
     /// @param self The stored oracle array
     /// @param time The time of the oracle initialization, via block.timestamp truncated to uint32
+    // oracle数组中已填充元素的数目
     /// @return cardinality The number of populated elements in the oracle array
+    // oracle数组的新长度，与population无关
     /// @return cardinalityNext The new length of the oracle array, independent of population
     function initialize(
         Observation[65535] storage self,
-        uint32 time
+        uint32 time //缩短成32位的区块时间戳
     ) internal returns (uint16 cardinality, uint16 cardinalityNext) {
+        // 创建第一个元素
         self[0] = Observation({
-            blockTimestamp: time,
-            tickCumulative: 0,
+            blockTimestamp: time, //区块时间戳
+            tickCumulative: 0, //初始累计值为0
             secondsPerLiquidityCumulativeX128: 0,
             initialized: true
         });
+        // （当前Oracle数组中的个数，最大可用个数）
         return (1, 1);
     }
 
@@ -78,13 +90,18 @@ library Oracle {
     /// If the index is at the end of the allowable array length (according to cardinality), and the next cardinality
     /// is greater than the current one, cardinality may be increased. This restriction is created to preserve ordering.
     /// @param self The stored oracle array
+    // 最近写入观测值数组的观测值的索引
     /// @param index The index of the observation that was most recently written to the observations array
     /// @param blockTimestamp The timestamp of the new observation
     /// @param tick The active tick at the time of the new observation
     /// @param liquidity The total in-range liquidity at the time of the new observation
+    // oracle数组中已填充元素的数目
     /// @param cardinality The number of populated elements in the oracle array
+    // oracle数组的新长度，与population无关
     /// @param cardinalityNext The new length of the oracle array, independent of population
+    // oracle数组中最近写入的元素的新索引
     /// @return indexUpdated The new index of the most recently written element in the oracle array
+    // oracle数组的新基数
     /// @return cardinalityUpdated The new cardinality of the oracle array
     function write(
         Observation[65535] storage self,
@@ -95,19 +112,25 @@ library Oracle {
         uint16 cardinality,
         uint16 cardinalityNext
     ) internal returns (uint16 indexUpdated, uint16 cardinalityUpdated) {
+        // 获取当前的Oracle数据
         Observation memory last = self[index];
 
         // early return if we've already written an observation this block
+        // 同一个区块内，只会在第一笔交易中写入 Oracle 数据
+        // 若是同一个区块，则直接返回输入的索引 和 Oracle数组数量
         if (last.blockTimestamp == blockTimestamp) return (index, cardinality);
 
         // if the conditions are right, we can bump the cardinality
+        // 检查是否需要使用新的数组空间
         if (cardinalityNext > cardinality && index == (cardinality - 1)) {
             cardinalityUpdated = cardinalityNext;
         } else {
             cardinalityUpdated = cardinality;
         }
 
+        // 算出新的索引，使用余数方式实现
         indexUpdated = (index + 1) % cardinalityUpdated;
+        // 写入Oracle数据
         self[indexUpdated] = transform(last, blockTimestamp, tick, liquidity);
     }
 
@@ -186,6 +209,7 @@ library Oracle {
         }
     }
 
+    // 找出的时间点前后，最近的两个 Oracle 数据。
     /// @notice Fetches the observations beforeOrAt and atOrAfter a given target, i.e. where [beforeOrAt, atOrAfter] is satisfied
     /// @dev Assumes there is at least 1 initialized observation.
     /// Used by observeSingle() to compute the counterfactual accumulator values as of a given block timestamp.
@@ -250,21 +274,25 @@ library Oracle {
     /// @return secondsPerLiquidityCumulativeX128 The time elapsed / max(1, liquidity) since the pool was first initialized, as of `secondsAgo`
     function observeSingle(
         Observation[65535] storage self,
-        uint32 time,
-        uint32 secondsAgo,//回头看的时间，以秒为单位，在这一点上返回观察结果
-        int24 tick,
-        uint16 index,
+        uint32 time, //当前区块时间戳
+        uint32 secondsAgo,
+        int24 tick, //slot0.tick,
+        uint16 index, //slot0.observationIndex,
         uint128 liquidity,
-        uint16 cardinality//oracle数组中已填充元素的数目
+        uint16 cardinality //slot0.observationCardinality oracle数组中已填充元素的数目
     ) internal view returns (int56 tickCumulative, uint160 secondsPerLiquidityCumulativeX128) {
+        // secondsAgo 为 0 表示当前的最新 Oracle 数据
         if (secondsAgo == 0) {
             Observation memory last = self[index];
+            // 如果Oracle数据里最新的一条数据里记录的时间戳  和当前传入的时间戳不一样，那么重新创建一份Oracle数据
             if (last.blockTimestamp != time) last = transform(last, time, tick, liquidity);
             return (last.tickCumulative, last.secondsPerLiquidityCumulativeX128);
         }
 
+        // 计算出 请求的时间戳， 当前的时间戳 - x秒
         uint32 target = time - secondsAgo;
 
+        // 计算出请求时间戳最近的两个 Oracle 数据
         (Observation memory beforeOrAt, Observation memory atOrAfter) = getSurroundingObservations(
             self,
             time,
@@ -277,12 +305,16 @@ library Oracle {
 
         if (target == beforeOrAt.blockTimestamp) {
             // we're at the left boundary
+            // 如果请求时间和返回的左侧时间戳吻合，那么可以直接使用
             return (beforeOrAt.tickCumulative, beforeOrAt.secondsPerLiquidityCumulativeX128);
         } else if (target == atOrAfter.blockTimestamp) {
             // we're at the right boundary
+            // 在右边界
+            // 也可以直接使用
             return (atOrAfter.tickCumulative, atOrAfter.secondsPerLiquidityCumulativeX128);
         } else {
             // we're in the middle
+            // 当请请求的时间在中间时，计算根据增长率计算出请求的时间点的 Oracle 值并返回
             uint32 observationTimeDelta = atOrAfter.blockTimestamp - beforeOrAt.blockTimestamp;
             uint32 targetDelta = target - beforeOrAt.blockTimestamp;
             return (
@@ -299,6 +331,7 @@ library Oracle {
         }
     }
 
+    // 返回' secondsAgos '数组中给定时间秒前的每个时间的累加器值
     /// @notice Returns the accumulator values as of each time seconds ago from the given time in the array of `secondsAgos`
     /// @dev Reverts if `secondsAgos` > oldest observation
     /// @param self The stored oracle array
@@ -320,7 +353,7 @@ library Oracle {
         uint16 cardinality
     ) internal view returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s) {
         require(cardinality > 0, 'I');
-
+        // 创建和输入参数 秒数数组一样长度的  数组用于返回
         tickCumulatives = new int56[](secondsAgos.length);
         secondsPerLiquidityCumulativeX128s = new uint160[](secondsAgos.length);
         for (uint256 i = 0; i < secondsAgos.length; i++) {

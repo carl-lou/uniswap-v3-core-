@@ -19,7 +19,7 @@ library TickBitmap {
     /// @return bitPos The bit position in the word where the flag is stored
     function position(int24 tick) private pure returns (int16 wordPos, uint8 bitPos) {
         // tick / 2^8 = tick / 256,商为wordPos,余数为bitPos
-        // 1个word是由256个tick组成。
+        // 1个word是由256个tick*tickSpacing组成。
         // 这里是找到这个tick位于哪个word，第几个word
         wordPos = int16(tick >> 8);
         // word里的第几位
@@ -31,11 +31,7 @@ library TickBitmap {
     /// @param self The mapping in which to flip the tick
     /// @param tick The tick to flip
     /// @param tickSpacing The spacing between usable ticks
-    function flipTick(
-        mapping(int16 => uint256) storage self,
-        int24 tick,
-        int24 tickSpacing
-    ) internal {
+    function flipTick(mapping(int16 => uint256) storage self, int24 tick, int24 tickSpacing) internal {
         // 确保tick已经经过tickSpacing舍去余数化了。(Tick / tickSpacing) * tickSpacing;
         require(tick % tickSpacing == 0); // ensure that the tick is spaced
         // 获取wordPos,bitPos
@@ -46,27 +42,33 @@ library TickBitmap {
         self[wordPos] ^= mask;
     }
 
-// 返回与给定刻度的左(小于或等于)或右(大于)刻度包含在同一word(或相邻word)中的下一个初始化的刻度
+    // 返回与给定刻度的左(小于或等于)或右(大于)刻度包含在同一word(或相邻word)中的下一个初始化的刻度
     /// @notice Returns the next initialized tick contained in the same word (or adjacent word) as the tick that is either
     /// to the left (less than or equal to) or right (greater than) of the given tick
     /// @param self The mapping in which to compute the next initialized tick
-    /// @param tick The starting tick
+    /// @param tick The starting tick 开始的tick索引
     /// @param tickSpacing The spacing between usable ticks
     /// @param lte Whether to search for the next initialized tick to the left (less than or equal to the starting tick)
     /// @return next The next initialized or uninitialized tick up to 256 ticks away from the current tick
     /// @return initialized Whether the next tick is initialized, as the function only searches within up to 256 ticks
     function nextInitializedTickWithinOneWord(
-        mapping(int16 => uint256) storage self,//表示用了这个方法的变量（这个library会赋予给某些变量，一般为 tickBitmap）
+        //表示用了这个方法的变量（这个library会赋予给某些变量，一般为 tickBitmap）
+        mapping(int16 => uint256) storage self,
         int24 tick,
         int24 tickSpacing,
+        //下一个tick是不是在左边
         bool lte
     ) internal view returns (int24 next, bool initialized) {
+        // tick压缩一下，用于计算处于第几个word
         int24 compressed = tick / tickSpacing;
+        // 如果tick是负值，并且不能整除tickSpacing，那么 压缩的tick需要 -1
         if (tick < 0 && tick % tickSpacing != 0) compressed--; // round towards negative infinity
 
         if (lte) {
+            // 向左移动，那么就是tick变小,要看的是左边的word区域
             (int16 wordPos, uint8 bitPos) = position(compressed);
             // all the 1s at or to the right of the current bitPos
+            // 所有的1s在或前往当前bitPos的右边
             uint256 mask = (1 << bitPos) - 1 + (1 << bitPos);
             uint256 masked = self[wordPos] & mask;
 

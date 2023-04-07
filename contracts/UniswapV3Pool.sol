@@ -29,6 +29,25 @@ import './interfaces/callback/IUniswapV3MintCallback.sol';
 import './interfaces/callback/IUniswapV3SwapCallback.sol';
 import './interfaces/callback/IUniswapV3FlashCallback.sol';
 
+// 基础公式
+/*
+amountX * amountY = k = L^2
+L表示流动性liquidity
+P=y/x (p为x的价格，以y计价，每个x需要多少个y)，  y的单价是x单价的倒数1/P
+一般地址大的为tokenY
+
+sqrt(P) 就是平方价
+可推导出
+x=sqrt(k/p)= L/sqrt(P)
+y=sqrt(k*P)= L * sqrt(P)
+
+diff表示变化量, 根据这 可以获知交易到指定价格P（不溢出流动性边界）,需要多少x token，可以获得多少y token（L流动性在交易过程中是已知的）
+给定多少x token (注入100个USDT),可以获得多少个y token (ETH)，以及最终的x,y价格
+diffX= 1/sqrt(diffP) * L
+diffY= sqrt(diffP) *L
+
+*/
+
 // 接口的实现粒度比较低，不适合普通用户使用，错误的调用其中的接口可能会造成经济上的损失。
 // 另外还有个peirphery 仓库，里面有对这个Pool合约进行再次封装的SwapRouter(用于与前端界面进行交互，对用户调用也更友好）
 // ，还有NonfungiblePositionManager用来增删改pool的流动性
@@ -131,7 +150,8 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
     ProtocolFees public override protocolFees;
 
     /// @inheritdoc IUniswapV3PoolState
-    // 当前可用于池的范围内的流动性,   liquidity等于x*y=k中K的平方根  ，liquidity*liquidity=常数k=x*y；
+    // 当前价格上，所有覆盖当前价格的头寸的 流动性之和,   
+    // liquidity等于x*y=k中K的平方根  ，liquidity*liquidity=常数k=x*y；
     // 存根号K而不是直接存K,是为了方便运算，以及减少溢出的可能性
     uint128 public override liquidity;
 
@@ -143,7 +163,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
     // 记录所有被当前价格 引用着的头寸的 tick上下限索引
     mapping(int16 => uint256) public override tickBitmap;
     /// @inheritdoc IUniswapV3PoolState
-    // 通过位置的键返回有关头寸的信息
+    // 通过头寸的键返回有关头寸的信息
     mapping(bytes32 => Position.Info) public override positions;
     /// @inheritdoc IUniswapV3PoolState
     //  返回关于特定观察索引的数据
@@ -320,7 +340,9 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
     /// @inheritdoc IUniswapV3PoolDerivedState
     // 从当前块时间戳中返回每个时间戳' secondsAgo '的累计tick和流动性
     function observe(
-        uint32[] calldata secondsAgos //多少秒之前。从多长时间以前，每个累计滴答和流动性价值应返回
+        // 动态数组，请求N秒之前的数据（以前的tickIndex累积值，流动性累积值）
+        // 一次性可以请求多个历史数据
+        uint32[] calldata secondsAgos 
     )
         external
         view
@@ -364,6 +386,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
 
         int24 tick = TickMath.getTickAtSqrtRatio(sqrtPriceX96);
 
+        // 初始化Oracle
         (uint16 cardinality, uint16 cardinalityNext) = observations.initialize(_blockTimestamp());
 
         // 新建一个Slot0实例
@@ -410,7 +433,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
         // 修改memory比storage 便宜很多。
         Slot0 memory _slot0 = slot0; // SLOAD for gas optimization
 
-        // 更新头寸，
+        // 更新头寸，返回头寸的详情
         position = _updatePosition(
             params.owner,
             params.tickLower,
@@ -421,7 +444,8 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
 
         if (params.liquidityDelta != 0) {
             // 根据流动性+tick上下限 ，逆运算出所需要的token0,token1数量，也是分三种情况
-            //
+
+            //当前市场价格的tick 小于 头寸下限tick,那么头寸里所有资金都应该是token0
             if (_slot0.tick < params.tickLower) {
                 // 当前刻度低于通过范围;流动性只能通过从左到右交叉进入范围，
                 // 当我们需要_more_ token0时(它变得更有价值)，所以用户必须提供它
@@ -446,20 +470,23 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
                     _slot0.observationCardinality,
                     _slot0.observationCardinalityNext
                 );
-
+                // 根据流动性，两个价格返回 amount0的数量
                 amount0 = SqrtPriceMath.getAmount0Delta(
-                    _slot0.sqrtPriceX96,
-                    TickMath.getSqrtRatioAtTick(params.tickUpper),
+                    _slot0.sqrtPriceX96,//当前价格
+                    TickMath.getSqrtRatioAtTick(params.tickUpper),//头寸上限
                     params.liquidityDelta
                 );
+                // 调换一下两个价格顺序
                 amount1 = SqrtPriceMath.getAmount1Delta(
-                    TickMath.getSqrtRatioAtTick(params.tickLower),
+                    TickMath.getSqrtRatioAtTick(params.tickLower),//头寸下限
                     _slot0.sqrtPriceX96,
                     params.liquidityDelta
                 );
-
+                // 当前价格的tick如果在头寸范围内，那么需要增加流动性liquidityBefore + params.liquidityDelta
+                // liquidity是全局变量，当前价格上 所有头寸的流动性之和
                 liquidity = LiquidityMath.addDelta(liquidityBefore, params.liquidityDelta);
             } else {
+                // 当前价格在 头寸上限 之上。
                 // current tick is above the passed range; liquidity can only become in range by crossing from right to
                 // left, when we'll need _more_ token1 (it's becoming more valuable) so user must provide it
                 amount1 = SqrtPriceMath.getAmount1Delta(
@@ -511,12 +538,14 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
                 liquidity,
                 slot0.observationCardinality //oracle数组中已填充元素的数目
             );
+            
+            // 要对上下两个边界tick里的详情进行更新
 
             // 更新ticks里对应的tickLower这个索引里的Tick.Info里的信息，返回激活状态是否变化的boos值
             flippedLower = ticks.update(
-                tickLower,
+                tickLower,//下边界
                 tick, //tickCurrent
-                liquidityDelta,
+                liquidityDelta,//流动性变化量
                 _feeGrowthGlobal0X128,
                 _feeGrowthGlobal1X128,
                 secondsPerLiquidityCumulativeX128,
@@ -534,32 +563,38 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
                 secondsPerLiquidityCumulativeX128,
                 tickCumulative,
                 time,
-                true,
+                true,//表示这是上边界
                 maxLiquidityPerTick
             );
 
+            // 若tickLower位置激活状态变化了，则 tickBitmap里也需要更新一下，
             if (flippedLower) {
-                // 若tickLower位置激活状态变化了，则 tickBitmap里也需要更新一下，wordPos和mask按位异或
+                // wordPos和mask按位异或
                 tickBitmap.flipTick(tickLower, tickSpacing);
             }
             if (flippedUpper) {
                 tickBitmap.flipTick(tickUpper, tickSpacing);
             }
         }
-        // 计算出此 position 里的 手续费总额
+        // 计算出此 position 里的 手续费总额；
+        // 所有fee - （tickLower以下部分 + tickUpper以上部分）
         (uint256 feeGrowthInside0X128, uint256 feeGrowthInside1X128) = ticks.getFeeGrowthInside(
             tickLower,
             tickUpper,
             tick,
-            _feeGrowthGlobal0X128,
+            _feeGrowthGlobal0X128,//所有刻度上的fee
             _feeGrowthGlobal1X128
         );
-
+        
+        // 更新头寸详情里的 流动性liquidityGross，liquidityNet，费用
         position.update(liquidityDelta, feeGrowthInside0X128, feeGrowthInside1X128);
 
         // clear any tick data that is no longer needed
+        // 若这次的流动性是 减少的
         if (liquidityDelta < 0) {
             if (flippedLower) {
+                // 并且流动性激活状态变化了，说明从有流动性变成了没有流动性
+                // 那么要清空以下tick里的数据，减少激活的tick数量，降低未来计算复杂度
                 ticks.clear(tickLower);
             }
             if (flippedUpper) {
@@ -570,7 +605,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
 
     // 为给定的接收者/tickLower/tickUpper头寸增加流动性
     /// @inheritdoc IUniswapV3PoolActions
-    // 无委托调用 通过_modifyPosition函数间接调用了
+    // 无委托调用的限制 通过_modifyPosition函数间接调用了
     /// @dev noDelegateCall is applied indirectly via _modifyPosition
     function mint(
         address recipient, //流动性拥有者
@@ -643,7 +678,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
     function burn(
         int24 tickLower,
         int24 tickUpper,
-        uint128 amount
+        uint128 amount//想要销毁的流动性额度
     ) external override lock returns (uint256 amount0, uint256 amount1) {
         // 更新头寸
         (Position.Info storage position, int256 amount0Int, int256 amount1Int) = _modifyPosition(
@@ -660,6 +695,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
 
         if (amount0 > 0 || amount1 > 0) {
             // 增加应给头寸所有者响应的费用
+            // 这里不是直接提取，提取还是通过collect函数
             (position.tokensOwed0, position.tokensOwed1) = (
                 position.tokensOwed0 + uint128(amount0),
                 position.tokensOwed1 + uint128(amount1)
@@ -903,14 +939,22 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
 
         // update tick and write an oracle entry if the tick change
         if (state.tick != slot0Start.tick) {
+            // 如果tick发生变化，则写入oracle条目
             (uint16 observationIndex, uint16 observationCardinality) = observations.write(
+                 // 交易前的最新 Oracle 索引
                 slot0Start.observationIndex,
+                // 当前区块时间
                 cache.blockTimestamp,
+                // 交易前的价格的tick，这样做是为了防止攻击
                 slot0Start.tick,
+                // 交易前的价格对应的流动性
                 cache.liquidityStart,
+                // 当前的Oracle数量
                 slot0Start.observationCardinality,
+                // 可用的Oracle数量
                 slot0Start.observationCardinalityNext
             );
+        // 更新当前平方价，tick， 最新Oracle指向的索引信息 以及当前Oracle数据的总数目
             (slot0.sqrtPriceX96, slot0.tick, slot0.observationIndex, slot0.observationCardinality) = (
                 state.sqrtPriceX96,
                 state.tick,
@@ -938,16 +982,29 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
             if (state.protocolFee > 0) protocolFees.token1 += state.protocolFee;
         }
 
+        // 确定最终用户支付的 token 数和得到的 token 数
         (amount0, amount1) = zeroForOne == exactInput
+        // 如果指定交易的金额大于0，且是注入token0兑换token1
+        // 那么要转账的amount0就是 注入金额-剩余金额； token1是循环中 累加的
             ? (amountSpecified - state.amountSpecifiedRemaining, state.amountCalculated)
             : (state.amountCalculated, amountSpecified - state.amountSpecifiedRemaining);
 
         // do the transfers and collect payment
         if (zeroForOne) {
+            // 如果是token0兑换成token1,
+            // 这里先给token1地址转账
+            // 前面说过 tokenOut 记录的是负数，这里要取反一下
+    // 由于是先给打款的，所以可以搞闪电贷
             if (amount1 < 0) TransferHelper.safeTransfer(token1, recipient, uint256(-amount1));
 
+            // 获取token0之前的余额，用于后续判断
             uint256 balance0Before = balance0();
+            // 调用 IUniswapV3SwapCallback这个协议的uniswapV3SwapCallback方法。 
+            // msg.sender一般为外围合约，见v3-periphery仓库
+            // 在这里面，要给Pool池子转账tokenIn，里面也可以做其他的操作（闪电贷）
+            // 外围合约可以自己写，而不是用Uniswap提供的v3-periphery
             IUniswapV3SwapCallback(msg.sender).uniswapV3SwapCallback(amount0, amount1, data);
+            // 最后校验，经过上面一步其他地方给pool地址的资金转入后的最新余额，要大于等于 (原本的余额balance0Before + 应该注入的amount0)
             require(balance0Before.add(uint256(amount0)) <= balance0(), 'IIA');
         } else {
             if (amount0 < 0) TransferHelper.safeTransfer(token0, recipient, uint256(-amount0));

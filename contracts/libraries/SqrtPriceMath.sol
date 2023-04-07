@@ -143,12 +143,17 @@ library SqrtPriceMath {
 
     // 获得两个价格之间需要多少的amount0变化量
     /// @notice Gets the amount0 delta between two prices
+// diff表示变化量, 根据这 可以获知交易到指定价格P（不溢出流动性边界）,需要多少x token，可以获得多少y token（L流动性在交易过程中是已知的）
+// 给定多少x token (注入100个USDT),可以获得多少个y token (ETH)，以及最终的x,y价格
+// diffX= 1/sqrt(diffP) * L
+// diffY= sqrt(diffP) *L
     /// @dev Calculates liquidity / sqrt(lower) - liquidity / sqrt(upper),
     /// i.e. liquidity * (sqrt(upper) - sqrt(lower)) / (sqrt(upper) * sqrt(lower))
     /// @param sqrtRatioAX96 A sqrt price
     /// @param sqrtRatioBX96 Another sqrt price
     /// @param liquidity The amount of usable liquidity
-    // 是否向上取整
+    // 是否向上取整，增加流动性为true，这样可以保证做市商提供足够的token到pool池子中。 
+    // 减少流动性为false，保证不会给用户多余的token（突出一个扣，当然也是为了防止坏账）
     /// @param roundUp Whether to round the amount up or down
     /// @return amount0 Amount of token0 required to cover a position of size liquidity between the two passed prices
     function getAmount0Delta(
@@ -157,7 +162,7 @@ library SqrtPriceMath {
         uint128 liquidity,
         bool roundUp
     ) internal pure returns (uint256 amount0) {
-        // 大的排前面，大的为A
+        // 大的排前面，大的为A，大的为tokenY,也就是采用diffY= sqrt(diffP) *L这个公式
         if (sqrtRatioAX96 > sqrtRatioBX96) (sqrtRatioAX96, sqrtRatioBX96) = (sqrtRatioBX96, sqrtRatioAX96);
         // 左移96位，乘以2^96， 浮点数转换为 96位小数的Q格式定点数
         uint256 numerator1 = uint256(liquidity) << FixedPoint96.RESOLUTION;
@@ -173,6 +178,7 @@ library SqrtPriceMath {
                 ? // divRoundingUp是没有做安全检查的 向上取整的除法（sqrtRatioAX96不为0）
                 UnsafeMath.divRoundingUp(
                     // 向上取整（numerator1×numerator2/sqrtRatioBX96）
+                    // 采用高精度fullMath，减少误差
                     FullMath.mulDivRoundingUp(numerator1, numerator2, sqrtRatioBX96),
                     sqrtRatioAX96
                 )
@@ -213,7 +219,9 @@ library SqrtPriceMath {
     ) internal pure returns (int256 amount0) {
         return
             liquidity < 0
+            // 流动性小于0，说明是减少流动性，就 向下取整，少给做市商钱
                 ? -getAmount0Delta(sqrtRatioAX96, sqrtRatioBX96, uint128(-liquidity), false).toInt256()
+                // 增加流动性就向上取整，要多给点钱，防止坏账
                 : getAmount0Delta(sqrtRatioAX96, sqrtRatioBX96, uint128(liquidity), true).toInt256();
     }
 
