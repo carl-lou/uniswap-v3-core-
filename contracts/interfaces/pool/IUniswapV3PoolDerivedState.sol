@@ -26,7 +26,7 @@ interface IUniswapV3PoolDerivedState {
         view
         returns (int56[] memory tickCumulatives, uint160[] memory secondsPerLiquidityCumulativeX128s);
 
-    // 返回滴答累积的快照，每个流动性秒和滴答范围内的秒
+    // 返回两个tick之间的 tick累积值，流动性累积值，秒数
     /// @notice Returns a snapshot of the tick cumulative, seconds per liquidity and seconds inside a tick range
     // 快照只能与在某个位置存在的时间段内拍摄的其他快照进行比较。也就是说，
     // 如果从第一个快照到第二个快照之间的整个时间内，某个位置都没有被保存，则不能进行快照比较。

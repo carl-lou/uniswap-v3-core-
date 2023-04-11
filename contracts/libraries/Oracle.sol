@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity >=0.5.0 <0.8.0;
 
+// 链上预言机，可以用来在链下寻找最优交易对价格源（流动性最大的池子）； 也可以获知最近一段时间的加权平均价格（用来绘制小时线，日线）
 // Oracle 数据的更新发生在价格变动的时候
+// 对历史价格的记录，还有对应的流动性（可以选流动性大的池子作为价格参考来源。 交易量最大的一个交易所，那个交易所就相当于拥有这个代币的定价权）
 
 /// @title Oracle
 // 为各种系统设计提供有用的价格和流动性数据
@@ -25,6 +27,12 @@ library Oracle {
         // tick index 的时间加权累积值
         // 刻度 累加器，即tickIndex * 自池第一次初始化以来所经过的时间
         // the tick accumulator, i.e. tick * time elapsed since the pool was first initialized
+        // last.tickCumulative + int56(tick) * 时间差。
+
+        // price(tick) = 1.0001^tick,当 tick 为 0 时，价格为 1；当 tick 为 1 时，价格为 1.0001；
+        // 当 tick 为 2 时，价格为 1.0001^2。也即是说，相邻价格点之间的价差为 0.01%。
+        // 当然，tick 也可以为负值，为负值时表明价格 p 小于 1。
+        // 可以通过TIckMath库里的getSqrtRatioAtTick方法，根据tick获知平方价
         int56 tickCumulative;
         // 价格所在区间的流动性的时间加权累积值
         // 每个流动性的秒数，即自池第一次初始化以来的秒数/最大(1，流动性)
@@ -129,6 +137,8 @@ library Oracle {
         }
 
         // 算出新的索引，使用余数方式实现
+        // 若依旧是初始化时候的（1，1）， 那么这里的index是0，cardinalityUpdated是1，1&1==0，
+        // 下一个indexUpdated还是0
         indexUpdated = (index + 1) % cardinalityUpdated;
         // 写入Oracle数据
         self[indexUpdated] = transform(last, blockTimestamp, tick, liquidity);
@@ -145,6 +155,9 @@ library Oracle {
         if (next <= current) return current;
         // store in each slot to prevent fresh SSTOREs in swaps
         // this data will not be used because the initialized boolean is still false
+        // 对数组中将来可能会用到的槽位进行写入，以初始化其空间，避免在 swap 中初始化，而初始化的过程消耗的gas是昂贵的
+        // 这样在代币交易写入新的 Oracle 数据时，不需要再进行初始化，可以让交易时更新 Oracle 不至于花费太多的 gas，
+        // SSTORE 指令由 20000 降至 5000。可以参考：EIP-1087, EIP-2200, EIP-2929，具体实现：core/vm/gas_table.go。
         for (uint16 i = current; i < next; i++) self[i].blockTimestamp = 1;
         return next;
     }
@@ -369,3 +382,7 @@ library Oracle {
         }
     }
 }
+
+
+
+// 参考文章：https://cloud.tencent.com/developer/article/2017547

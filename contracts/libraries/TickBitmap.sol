@@ -43,6 +43,8 @@ library TickBitmap {
     }
 
     // 返回与给定刻度的左(小于或等于)或右(大于)刻度包含在同一word(或相邻word)中的下一个初始化的刻度
+    // 就是寻找当前word区间内有没有记录其他激活了的tickIndex，有则找出来，没有则采用这个word的边界；
+    // 用word的方式来限制每一步交易的跨度不要太大，减少计算中溢出的可能性
     /// @notice Returns the next initialized tick contained in the same word (or adjacent word) as the tick that is either
     /// to the left (less than or equal to) or right (greater than) of the given tick
     /// @param self The mapping in which to compute the next initialized tick

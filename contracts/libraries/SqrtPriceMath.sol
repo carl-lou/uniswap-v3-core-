@@ -32,18 +32,23 @@ library SqrtPriceMath {
         bool add
     ) internal pure returns (uint160) {
         // we short circuit amount == 0 because the result is otherwise not guaranteed to equal the input price
+        // 如果指定输入/输出的金额是0，说明没啥变化，那还是原来的价格
         if (amount == 0) return sqrtPX96;
+        // 浮点数 * 2^96，转成 Q96格式的定点数
         uint256 numerator1 = uint256(liquidity) << FixedPoint96.RESOLUTION;
 
         if (add) {
+            // 如果是注入资金
             uint256 product;
             if ((product = amount * sqrtPX96) / amount == sqrtPX96) {
+                // 如果没有溢出问题，两份流动性加起来
                 uint256 denominator = numerator1 + product;
                 if (denominator >= numerator1)
                     // always fits in 160 bits
+                    //  sqrtPX96  *  （原本的流动性numerator1 / 两份流动性之和denominator）
                     return uint160(FullMath.mulDivRoundingUp(numerator1, sqrtPX96, denominator));
             }
-
+            // 原来的流动性numerator1 /  代币数量之和
             return uint160(UnsafeMath.divRoundingUp(numerator1, (numerator1 / sqrtPX96).add(amount)));
         } else {
             uint256 product;
@@ -55,6 +60,7 @@ library SqrtPriceMath {
         }
     }
 
+    // 在给定token1的情况下，获取下一个平方根价格
     /// @notice Gets the next sqrt price given a delta of token1
     /// @dev Always rounds down, because in the exact output case (decreasing price) we need to move the price at least
     /// far enough to get the desired output amount, and in the exact input case (increasing price) we need to move the
@@ -94,6 +100,7 @@ library SqrtPriceMath {
         }
     }
 
+    // 如拿100个USDT去兑换，能够让ETH从2000，涨到多少，2001还是2000.1
     /// @notice Gets the next sqrt price given an input amount of token0 or token1
     /// @dev Throws if price or liquidity are 0, or if the next price is out of bounds
     /// @param sqrtPX96 The starting price, i.e., before accounting for the input amount
@@ -118,6 +125,7 @@ library SqrtPriceMath {
     }
 
     // 在给定token0或token1的输出量的情况下，获取下一个平方根价格
+    // USDT换ETH,要指定换出10个ETH，会导致ETH价格涨到多少
     /// @notice Gets the next sqrt price given an output amount of token0 or token1
     /// @dev Throws if price or liquidity are 0 or the next price is out of bounds
     /// @param sqrtPX96 The starting price before accounting for the output amount
@@ -137,6 +145,7 @@ library SqrtPriceMath {
         // round to make sure that we pass the target price
         return
             zeroForOne
+            // 这里向下向上取整，也是为了防止多给算
                 ? getNextSqrtPriceFromAmount1RoundingDown(sqrtPX96, liquidity, amountOut, false)
                 : getNextSqrtPriceFromAmount0RoundingUp(sqrtPX96, liquidity, amountOut, false);
     }

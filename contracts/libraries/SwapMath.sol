@@ -47,7 +47,7 @@ library SwapMath {
             // 即此步骤最多需要的手续费数额
             // amountRemaining * (1000000 - feePips) / 1000000, 100w是费率基数,feePips可能为500（万分之5），那么剩余的也就是注入金额的万分之九千九百九十5
             // 先将 tokenIn 的余额扣除掉最大所需的手续费
-            // FullMath是为了防止溢出造成精度损失
+            // FullMath是为了减少溢出造成精度损失
             uint256 amountRemainingLessFee = FullMath.mulDiv(uint256(amountRemaining), 1e6 - feePips, 1e6);
             // 算出达到目标价所需要消耗的tokenIn数量
             amountIn = zeroForOne // 如果是token0兑换成token1,那么消耗的是token0的数量

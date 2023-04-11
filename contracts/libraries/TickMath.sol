@@ -31,7 +31,6 @@ library TickMath {
         // 绝对值需要小于 最大的刻度
         require(absTick <= uint256(MAX_TICK), 'T');
         
-        // 1/sqrt(1.0001)^1,  1/sqrt(1.0001)^2,
         uint256 ratio = absTick & 0x1 != 0 ? 0xfffcb933bd6fad37aa2d162d1a594001 : 0x100000000000000000000000000000000;
         if (absTick & 0x2 != 0) ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128;
         if (absTick & 0x4 != 0) ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128;
@@ -53,9 +52,11 @@ library TickMath {
         if (absTick & 0x40000 != 0) ratio = (ratio * 0x2216e584f5fa1ea926041bedfe98) >> 128;
         if (absTick & 0x80000 != 0) ratio = (ratio * 0x48a170391f7dc42444e8fa2) >> 128;
 
+        // 2^256 * ratio
         if (tick > 0) ratio = type(uint256).max / ratio;
 
-        // 这除以1<<32四舍五入，从Q128.128到Q128.96。
+        // ratio/(2^32)，然后向上取整
+        // ratio除以1<<32四舍五入向上取整，从Q128.128到Q128.96。
         // this divides by 1<<32 rounding up to go from a Q128.128 to a Q128.96.
         // 然后向下转换，因为我们知道由于tick输入限制，结果总是适合160位以内
         // we then downcast because we know the result always fits within 160 bits due to our tick input constraint
@@ -64,6 +65,7 @@ library TickMath {
         sqrtPriceX96 = uint160((ratio >> 32) + (ratio % (1 << 32) == 0 ? 0 : 1));
     }
 
+    // 根据价格算出tick
     // 计算最大的刻度值，使getRatioAtTick(tick) <= ratio
     /// @notice Calculates the greatest tick value such that getRatioAtTick(tick) <= ratio
     // 在sqrtPriceX96 < MIN_SQRT_RATIO时抛出，因为MIN_SQRT_RATIO是getRatioAtTick可能返回的最小值。
@@ -73,6 +75,7 @@ library TickMath {
     /// @return tick The greatest tick for which the ratio is less than or equal to the input ratio
     function getTickAtSqrtRatio(uint160 sqrtPriceX96) internal pure returns (int24 tick) {
         // second inequality must be < because the price can never reach the price at the max tick
+        // 价格应小于最大值，大于最小值
         require(sqrtPriceX96 >= MIN_SQRT_RATIO && sqrtPriceX96 < MAX_SQRT_RATIO, 'R');
         // 二进制里所有数字 左位移32位，相当于乘 2^32
         uint256 ratio = uint256(sqrtPriceX96) << 32;

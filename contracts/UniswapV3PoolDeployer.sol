@@ -40,7 +40,7 @@ contract UniswapV3PoolDeployer is IUniswapV3PoolDeployer {
     ) internal returns (address pool) {
         // 新建一个Parameters构造的实例
         parameters = Parameters({factory: factory, 
-        token0: token0, 
+        token0: token0, //ETH
         token1: token1, 
         fee: fee, 
         tickSpacing: tickSpacing});

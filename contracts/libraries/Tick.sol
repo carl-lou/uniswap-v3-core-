@@ -33,7 +33,7 @@ library Tick {
         // only has relative meaning, not absolute — the value depends on when the tick is initialized
         uint256 feeGrowthOutside0X128;
         uint256 feeGrowthOutside1X128;
-        // 在刻度的另一侧的累积刻度值
+        // 预言机Oracle 在刻度的另一侧的累积刻度值
         // the cumulative tick value on the other side of the tick
         int56 tickCumulativeOutside;
         // 在刻度的另一侧(相对于当前刻度)，
@@ -41,6 +41,7 @@ library Tick {
         // the seconds per unit of liquidity on the _other_ side of this tick (relative to the current tick)
         // only has relative meaning, not absolute — the value depends on when the tick is initialized
         uint160 secondsPerLiquidityOutsideX128;
+        // Oracle相关
         // the seconds spent on the other side of the tick (relative to the current tick)
         // only has relative meaning, not absolute — the value depends on when the tick is initialized
         uint32 secondsOutside;
@@ -218,8 +219,8 @@ library Tick {
             // 第一个头寸的tickLower是 0.1，tickUpper是0.3，流动性是10
             // 第二个头寸的tickLower是 0.3,tickUpper是0.7，流动性是20
             // 那么tick 0.1上的LiquidityNet是10，liquidityGross==10
-            // tick 0.3上的liquidityNet是20-10=10，liquidityGross==30
-            // tick 0.5 上的liquidityNet是-20，liquidityGross==20
+            // tick 0.3上的liquidityNet是-10+20=10，liquidityGross==30
+            // tick 0.7 上的liquidityNet是-20，liquidityGross==20
     }
 
     /// @notice Clears tick data

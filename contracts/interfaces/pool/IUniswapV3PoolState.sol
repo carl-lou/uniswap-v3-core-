@@ -99,9 +99,10 @@ interface IUniswapV3PoolState {
     /// In addition, these values are only relative and must be used only in comparison to previous snapshots for
     /// a specific position.
     function ticks(
-        // log(1.0001的平方根) * 当前价格P的平方根(也就是sqrtPriceX96)  （P=y/X=sqrtPriceX96 * sqrtPriceX96)
-        // int24 tick相当于 索引
-        // 索引为0时，价格P为1
+        // log(1.0001的平方根) * 当前价格P的平方根(也就是sqrtPriceX96)  
+        // log(sqrt(1.001)) * sqrt(p)
+        // 其中 P = y/X = sqrtPriceX96 * sqrtPriceX96
+        // int24 tick 相当于 索引
         int24 tick
     )
         external
