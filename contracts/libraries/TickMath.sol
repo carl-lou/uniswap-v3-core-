@@ -6,16 +6,18 @@ pragma solidity >=0.5.0 <0.8.0;
 /// prices between 2**-128 and 2**128
 library TickMath {
     // 可以传递给#getSqrtRatioAtTick的最小刻度，从log以1.0001为基数的2**-128计算
+    // 1.0001^887272 约等于  2^128
     /// @dev The minimum tick that may be passed to #getSqrtRatioAtTick computed from log base 1.0001 of 2**-128
-    // 887272= 2^64,  上下限为什么是2^64,是由于 价格 根号P以Q64.96精度的定点数来储存
     int24 internal constant MIN_TICK = -887272;
     /// @dev The maximum tick that may be passed to #getSqrtRatioAtTick computed from log base 1.0001 of 2**128
     int24 internal constant MAX_TICK = -MIN_TICK;
 
     // 从#getSqrtRatioAtTick返回的最小值。等价于gettsqrtratioattick (MIN_TICK)
+    // 约等于2^32，由于是Q64.96格式，实际最小值是(2^32)/(2^96)=1/(2^64)
     /// @dev The minimum value that can be returned from #getSqrtRatioAtTick. Equivalent to getSqrtRatioAtTick(MIN_TICK)
     uint160 internal constant MIN_SQRT_RATIO = 4295128739;
     /// @dev The maximum value that can be returned from #getSqrtRatioAtTick. Equivalent to getSqrtRatioAtTick(MAX_TICK)
+    // 约等于2^160
     uint160 internal constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
 
     // 根据传入的刻度，返回一个平方价，计算规则为  平方根(1.0001^tick) * 2^96
@@ -77,9 +79,9 @@ library TickMath {
         // second inequality must be < because the price can never reach the price at the max tick
         // 价格应小于最大值，大于最小值
         require(sqrtPriceX96 >= MIN_SQRT_RATIO && sqrtPriceX96 < MAX_SQRT_RATIO, 'R');
-        // 二进制里所有数字 左位移32位，相当于乘 2^32
+        // sqrtPriceX96 二进制里所有数字 左位移32位，相当于乘 2^32
         uint256 ratio = uint256(sqrtPriceX96) << 32;
-
+        // 创建副本
         uint256 r = ratio;
         uint256 msb = 0;
 
