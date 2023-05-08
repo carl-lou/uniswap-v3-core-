@@ -150,7 +150,7 @@ library SqrtPriceMath {
                 : getNextSqrtPriceFromAmount0RoundingUp(sqrtPX96, liquidity, amountOut, false);
     }
 
-    // 获得两个价格之间需要多少的amount0变化量
+    // 获得两个价格之间需要多少的amount0变化量。从一个价格到另一个价格需要多少amount0
     /// @notice Gets the amount0 delta between two prices
 // diff表示变化量, 根据这 可以获知交易到指定价格P（不溢出流动性边界）,需要多少x token，可以获得多少y token（L流动性在交易过程中是已知的）
 // 给定多少x token (注入100个USDT),可以获得多少个y token (ETH)，以及最终的x,y价格

@@ -71,7 +71,8 @@ library SwapMath {
             // 如果是token0换成token1，则计算当前价到目标价token1需要的金额量
                 ? SqrtPriceMath.getAmount1Delta(sqrtRatioTargetX96, sqrtRatioCurrentX96, liquidity, false)
                 : SqrtPriceMath.getAmount0Delta(sqrtRatioCurrentX96, sqrtRatioTargetX96, liquidity, false);
-            // 如果缺的注入资金的额度绝对值  比 这次需要的输出token的量要大，那说明目标价能达到，目标价直接赋值给下次循环的价格
+            // 缺的需输出资金的额度（原来是负值，负负得正）  比 这次需要的输出token的量要大，
+            // 那说明目标价能达到，目标价直接赋值给下次循环的价格
             if (uint256(-amountRemaining) >= amountOut) sqrtRatioNextX96 = sqrtRatioTargetX96;
             else
             // 在给定token0或token1的输出量的情况下，获取下一个平方根价格

@@ -58,7 +58,7 @@ library TickBitmap {
         mapping(int16 => uint256) storage self,
         int24 tick,
         int24 tickSpacing,
-        //下一个tick是不是在左边
+        //下一个tick是不是在左边,tick是否向左移动，价格降低
         bool lte
     ) internal view returns (int24 next, bool initialized) {
         // tick压缩一下，用于计算处于第几个word
@@ -71,27 +71,41 @@ library TickBitmap {
             (int16 wordPos, uint8 bitPos) = position(compressed);
             // all the 1s at or to the right of the current bitPos
             // 所有的1s在或前往当前bitPos的右边
+            // 若bitPos为1，那么1<<bitPos为0000...00010,转换成十进制为2，mask为2-1+2=3，为00...00011
             uint256 mask = (1 << bitPos) - 1 + (1 << bitPos);
+            // self[wordPos] ^= mask = 1 << bitPos;
+            // 那么self[wordPos]为000010，and 0000011的结果为 0000010
             uint256 masked = self[wordPos] & mask;
 
             // if there are no initialized ticks to the right of or at the current tick, return rightmost in the word
+            // 如果当前刻度 右侧或当前刻度处没有已初始化的刻度，则返回word中的最右侧tick
             initialized = masked != 0;
             // overflow/underflow is possible, but prevented externally by limiting both tickSpacing and tick
+            // 上溢/下溢是有可能的，但可以通过限制tickSpacing和tick 来从外部阻止
             next = initialized
                 ? (compressed - int24(bitPos - BitMath.mostSignificantBit(masked))) * tickSpacing
+                // 去掉余数bitPos，返回左侧那个word的最右侧tick（当前word最左侧tick)
                 : (compressed - int24(bitPos)) * tickSpacing;
         } else {
             // start from the word of the next tick, since the current tick state doesn't matter
+            // 从下一个刻度的word开始，因为当前刻度状态无关紧要
             (int16 wordPos, uint8 bitPos) = position(compressed + 1);
             // all the 1s at or to the left of the bitPos
+            // 若bitPos==1,那么1<<bitPos 为2进制00...00010，也就是2,2-1=1，换算成2进制就是0001，~取反就是111...1110
             uint256 mask = ~((1 << bitPos) - 1);
+            // self[wordPos] ^= mask = 1 << bitPos;
+            // 原本position(compressed)的bitPos很可能是0，那么self[wordPos]=000...00001
+            // 000...00001 & 111...1110 == 0
             uint256 masked = self[wordPos] & mask;
 
             // if there are no initialized ticks to the left of the current tick, return leftmost in the word
+            // 如果当前刻度左侧侧或当前刻度处没有已初始化的刻度，则返回word中的最左侧tick
+            // 若不等于0，则表示这个word里左侧还有初始化过的tick
             initialized = masked != 0;
             // overflow/underflow is possible, but prevented externally by limiting both tickSpacing and tick
             next = initialized
                 ? (compressed + 1 + int24(BitMath.leastSignificantBit(masked) - bitPos)) * tickSpacing
+                // 补齐余数即达到word最右侧，并+1,当前word的最右侧(右侧word的最左侧tick)
                 : (compressed + 1 + int24(type(uint8).max - bitPos)) * tickSpacing;
         }
     }

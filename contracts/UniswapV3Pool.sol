@@ -29,8 +29,10 @@ import './interfaces/callback/IUniswapV3MintCallback.sol';
 import './interfaces/callback/IUniswapV3SwapCallback.sol';
 import './interfaces/callback/IUniswapV3FlashCallback.sol';
 
-// 上一段视频讲了uniswap的基础介绍，以及工厂合约
-// 现在开始讲pool合约，以及periphery外围合约
+// 上2段视频讲了uniswap的基础介绍，以及工厂合约 + 注入流动性
+// 这视频讲普通用户 兑换货币，swap交易的过程
+// 觉得我讲得好，记得分享一下。需要注释代码的，加我微信loulan0176即可。 也可以进群交流一下技术。
+
 // 1.外围合约从创建池子 => 做市商注入流动性 铸造NFT头寸 => 更新流动性，更新tick
 // 2.普通用户交易，外围合约解析调用路径path，然后调用 pool合约 swap函数，最后算出要兑换的tokenOut金额
 // 过程中涵盖 费用，预言机，闪电贷等内容。
@@ -39,6 +41,7 @@ import './interfaces/callback/IUniswapV3FlashCallback.sol';
 
 // 学完这个，我觉得可以算是入门defi了，出去也可以吹一下牛逼了。
 // 再去看其他类似的交易所的代码，借贷的代码，也会简单很多。
+
 
 
 // 基础公式
@@ -56,7 +59,7 @@ y=sqrt(k*P)= L * sqrt(P)
 diff表示变化量, 根据这 可以获知交易到指定价格P（不溢出流动性边界）,需要多少x token，可以获得多少y token（L流动性在交易过程中是已知的）
 给定多少x token (注入100个USDT),可以获得多少个y token (ETH)，以及最终的x,y价格
 diffX= 1/sqrt(diffP) * L
-diffY= sqrt(diffP) *L
+diffY= sqrt(diffP) * L
 
 */
 
@@ -791,11 +794,10 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
 
     // 交易token0和token1
     /// @inheritdoc IUniswapV3PoolActions
-    //
     function swap(
         address recipient, //接收者
         bool zeroForOne, //是不是16进制地址数值小的token地址 转给大的token
-        int256 amountSpecified, //想要交换的量,
+        int256 amountSpecified, //想要交换的量,指定输出金额的时候，这里传入的是负值
         uint160 sqrtPriceLimitX96, //Q64.96格式的根号限价。如果token0换成token1，则交换后的价格不能小于此值。 如果1换成0,swap后的price不能大于此值
         bytes calldata data //带有path和payer
     ) external override noDelegateCall returns (int256 amount0, int256 amount1) {
@@ -808,6 +810,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
         require(slot0Start.unlocked, 'LOK');
         require(
             zeroForOne // token0兑换成token1时，传入的sqrtPriceLimitX96限价 需要小于sqrtPriceX96，并且大于MIN_SQRT_RATIO 4295128739
+            // 如USDT兑换ETH，ETH的市场价为2000，限制的价格肯定是要小于2000的，并且限价大于tick最小值
                 ? sqrtPriceLimitX96 < slot0Start.sqrtPriceX96 && sqrtPriceLimitX96 > TickMath.MIN_SQRT_RATIO
                 : sqrtPriceLimitX96 > slot0Start.sqrtPriceX96 && sqrtPriceLimitX96 < TickMath.MAX_SQRT_RATIO,
             'SPL'
@@ -815,12 +818,13 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
         // 锁定池子
         slot0.unlocked = false;
 
-        // 交易缓存建立，储存在内存里
+        // 交易缓存建立，储存在内存里.这里面的变量后面会经常需要读取/修改，so 储存在memory里
         SwapCache memory cache = SwapCache({
             liquidityStart: liquidity, //刚开始时的流动性
             blockTimestamp: _blockTimestamp(), //当前区块的时间戳
             //feeProtocol是协议要收取的手续费。 0换成1时，费用为feeProtocol/16的余数。
             //  token1换成0时，slot0Start.feeProtocol位右移4位，相当于除以2^4(除以16后的整数)
+            // 这是设置协议手续费的时候，就是把两个协议费用，这样子的方式存入slot0的，见setFeeProtocol方法
             feeProtocol: zeroForOne ? (slot0Start.feeProtocol % 16) : (slot0Start.feeProtocol >> 4),
             //  每个流动性累加器的当前秒值，仅在经过初始化的刻度时累加，刚开始时为0
             secondsPerLiquidityCumulativeX128: 0,
@@ -830,7 +834,7 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
             computedLatestObservation: false
         });
 
-        // amountSpecified必然大于等于0，这里只是区分了0或者不是0
+        // 若是指定输出多少金额的情况，则amountSpecified<0，exactInput是负值
         bool exactInput = amountSpecified > 0;
 
         // 创建一个交易状态数据结构，这些值在交易的步骤中可能会发生变化
@@ -855,17 +859,18 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
             // 交易的起始价格
             step.sqrtPriceStartX96 = state.sqrtPriceX96;
 
-            // 通过tick位图找到下一个可以选的交易价格tickNext，(tick可以换算成价格)
-            // 这个刻度 可能还在流动性范围内，也可能不在了，看是否初始化initialized
+            // 通过tick位图找到下一个可以选的交易价格tickNext，（下一个激活的tick，或者word边界tick)
+            // 这个刻度 可能还在流动性范围内，也可能不在了
             (step.tickNext, step.initialized) = tickBitmap.nextInitializedTickWithinOneWord(
                 state.tick,
                 tickSpacing,
-                zeroForOne //token0兑换token1的话，就是向左移动
+                zeroForOne //token0兑换token1的话，就是向左移动，价格下降
             );
 
-            // 确保我们没有超过最小/最大刻度，因为刻度位图不知道这些界限
+            // 确保我们没有超过tick最小/最大刻度，因为刻度位图不知道这些界限
             // ensure that we do not overshoot the min/max tick, as the tick bitmap is not aware of these bounds
             if (step.tickNext < TickMath.MIN_TICK) {
+                // 若超越边界，则边界即为下一个tick
                 step.tickNext = TickMath.MIN_TICK;
             } else if (step.tickNext > TickMath.MAX_TICK) {
                 step.tickNext = TickMath.MAX_TICK;
@@ -898,7 +903,8 @@ contract UniswapV3Pool is IUniswapV3Pool, NoDelegateCall {
                 // 这里的amountCalculated是输出
                 state.amountCalculated = state.amountCalculated.sub(step.amountOut.toInt256());
             } else {
-                // 如果最初注入的资金小于等于0
+                // 如果是指定输出多少金额
+                // 
                 // 那注入资金加上 输出amountOut（负值）
                 state.amountSpecifiedRemaining += step.amountOut.toInt256();
                 // 累加值amountCalculated则是 输入金额amountIn了。
