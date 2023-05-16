@@ -40,7 +40,7 @@ library FullMath {
             // (x * y)% k ,a*b的积 在对not(0)取余数
             let mm := mulmod(a, b, not(0))
             prod0 := mul(a, b)
-            // sub(mm, prod0)表示mm-prod0
+            // sub(mm, prod0)表示mm-prod0,结果存在mm里
             // lt(mm,prod0)表示如果 mm < prod0，则为1，否则为0
             prod1 := sub(sub(mm, prod0), lt(mm, prod0))
         }
@@ -132,10 +132,12 @@ library FullMath {
         uint256 b,
         uint256 denominator
     ) internal pure returns (uint256 result) {
-        // a×b/denominator
+        // a × b / denominator
         result = mulDiv(a, b, denominator);
         if (mulmod(a, b, denominator) > 0) {
+            // 不能溢出uint256
             require(result < type(uint256).max);
+            // 若有余数（不能整除），则往上+1
             result++;
         }
     }

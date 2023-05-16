@@ -254,15 +254,17 @@ library Tick {
         uint256 feeGrowthGlobal1X128,
         uint160 secondsPerLiquidityCumulativeX128,
         int56 tickCumulative,
-        uint32 time
+        uint32 time//当前区块时间
     ) internal returns (int128 liquidityNet) {
         Tick.Info storage info = self[tick];
         // 全局累计费用 - 外侧费用
         info.feeGrowthOutside0X128 = feeGrowthGlobal0X128 - info.feeGrowthOutside0X128;
         info.feeGrowthOutside1X128 = feeGrowthGlobal1X128 - info.feeGrowthOutside1X128;
+        // 更新tick里的预言机观察者相关信息
         info.secondsPerLiquidityOutsideX128 = secondsPerLiquidityCumulativeX128 - info.secondsPerLiquidityOutsideX128;
         info.tickCumulativeOutside = tickCumulative - info.tickCumulativeOutside;
         info.secondsOutside = time - info.secondsOutside;
+        // 返回原本存在这个tick里面的流动性金额
         liquidityNet = info.liquidityNet;
     }
 }

@@ -37,8 +37,10 @@ library TickBitmap {
         // 获取wordPos,bitPos
         (int16 wordPos, uint8 bitPos) = position(tick / tickSpacing);
         // 相当于2^bitPos
+        // 如bitPos==2，那么mask为000...000100
         uint256 mask = 1 << bitPos;
         // tickBitmap里的wordPos与mask按位异或
+        // Xor异或运算，指的是两个二进制数值逐位对比，若一个为1，一个为0时，结果为1
         self[wordPos] ^= mask;
     }
 
@@ -54,7 +56,7 @@ library TickBitmap {
     /// @return next The next initialized or uninitialized tick up to 256 ticks away from the current tick
     /// @return initialized Whether the next tick is initialized, as the function only searches within up to 256 ticks
     function nextInitializedTickWithinOneWord(
-        //表示用了这个方法的变量（这个library会赋予给某些变量，一般为 tickBitmap）
+        //表示调用了这个方法的变量（tickBitmap）
         mapping(int16 => uint256) storage self,
         int24 tick,
         int24 tickSpacing,
@@ -78,7 +80,7 @@ library TickBitmap {
             uint256 masked = self[wordPos] & mask;
 
             // if there are no initialized ticks to the right of or at the current tick, return rightmost in the word
-            // 如果当前刻度 右侧或当前刻度处没有已初始化的刻度，则返回word中的最右侧tick
+            // 如果当前刻度 右侧或当前刻度所在word处没有已初始化的刻度，则返回word中的最右侧tick
             initialized = masked != 0;
             // overflow/underflow is possible, but prevented externally by limiting both tickSpacing and tick
             // 上溢/下溢是有可能的，但可以通过限制tickSpacing和tick 来从外部阻止
